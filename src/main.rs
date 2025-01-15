@@ -159,6 +159,9 @@ fn adjustable_hull_side(adjustable_hull: &AdjustableHull, resolution: usize, fro
     //len 1 height 4.7 forward width 0.25 backward width 2.65 forward spread 0.765 backwardspread 1.02 height scale 0.94175 height offset 0.01912 top roundness 0 bottom roundness 1
     //90 180 0
 
+    let mut sum_x: f32 = 0.0;
+    let mut sum_y: f32 = 0.0;
+
     for i in 0..resolution {
         let angle = f32::consts::TAU*((i as f32)/(resolution as f32));
         let cos_angle = f32::cos(angle);
@@ -172,7 +175,7 @@ fn adjustable_hull_side(adjustable_hull: &AdjustableHull, resolution: usize, fro
             if sin_angle>0.0 {adjustable_hull.top_roundness} else {adjustable_hull.bottom_roundness}
         );
 
-        //println!("the height {} percentage is {} and the cosangle is {} but times multiplier is {} and the lerp is from {} to {} ", sin_angle*multiplier,((sin_angle*multiplier)/2.0)+0.5,cos_angle,cos_angle*multiplier,half_width,half_width+half_spread);
+        println!("the height {} percentage is {} and the cosangle is {} but times multiplier is {} and the lerp is from {} to {} ", sin_angle*multiplier,((sin_angle*multiplier)/2.0)+0.5,cos_angle,cos_angle*multiplier,half_width,half_width+half_spread);
 
         
 
@@ -182,11 +185,13 @@ fn adjustable_hull_side(adjustable_hull: &AdjustableHull, resolution: usize, fro
             f32::clamp((sin_angle*multiplier*height_multiplier)+height_offset,-max_half_height,max_half_height),
             (if front {0.5} else {-0.5})*adjustable_hull.length
         ]);
+        sum_x+=vertices.last().unwrap()[0];
+        sum_y+=vertices.last().unwrap()[1];
         //println!("the result is {:?}",vertices.last().unwrap());
         //println!("adding the {}, {}, 0.0 to vertices",cos_angle*multiplier,sin_angle*multiplier);
     }
 
-    vertices.push([0.0,0.0,(if front {0.5} else {-0.5})*adjustable_hull.length]);
+    vertices.push([sum_x/(resolution as f32),sum_y/(resolution as f32),(if front {0.5} else {-0.5})*adjustable_hull.length]);
 
 
     let mut indices: Vec<u32> = Vec::with_capacity(3 * (resolution));
