@@ -1,4 +1,4 @@
-use bevy::{asset::RenderAssetUsages, color::Color, input::mouse::AccumulatedMouseMotion, pbr::ScreenSpaceAmbientOcclusion, prelude::*, render::mesh::Indices, window::CursorGrabMode};
+use bevy::{asset::RenderAssetUsages, color::Color, input::mouse::AccumulatedMouseMotion, math::DVec2, pbr::ScreenSpaceAmbientOcclusion, prelude::*, render::mesh::Indices, window::CursorGrabMode};
 use std::{env, f32::consts::FRAC_PI_2};
 
 /// A vector representing the player's input, accumulated over all frames that ran
@@ -151,8 +151,15 @@ pub fn interpolate_rendered_transform(
 
 pub fn move_player(
     accumulated_mouse_motion: Res<AccumulatedMouseMotion>,
+    windows: Query<&mut Window>,
+    mouse: Res<ButtonInput<MouseButton>>,
     mut player: Query<(&mut Transform), With<Camera3d>>,
 ) {
+    let mut window = windows.single();
+    if window.cursor_options.grab_mode != CursorGrabMode::Locked && !mouse.pressed(MouseButton::Right) {
+        return;
+    }
+
     let Ok(mut transform) = player.get_single_mut() else {
         return;
     };
@@ -195,11 +202,19 @@ pub fn grab_mouse(
     if mouse.just_pressed(MouseButton::Left) {
         window.cursor_options.visible = false;
         window.cursor_options.grab_mode = CursorGrabMode::Locked;
+        let new_pos = Some(
+                DVec2 { x: window.physical_width() as f64/2.0, y: window.physical_height() as f64/2.0}
+            );
+        window.set_physical_cursor_position(new_pos);
     }
 
     if key.just_pressed(KeyCode::Escape) {
         window.cursor_options.visible = true;
         window.cursor_options.grab_mode = CursorGrabMode::None;
+        let new_pos = Some(
+                DVec2 { x: window.physical_width() as f64/2.0, y: window.physical_height() as f64/2.0}
+            );
+        window.set_physical_cursor_position(new_pos);
     }
 }
 

@@ -37,12 +37,21 @@ fn temp_test_update(
     mut commands: Commands
 ) {
     if key.just_pressed(KeyCode::KeyH) {
+        let hovered_mat = StandardMaterial::from_color(Color::WHITE);
+        let hovered_mat_handle = materials.add(hovered_mat);
         
 
         for mut pair in &mut query {
-            materials.insert(pair.2.id(),
-                StandardMaterial::from_color(base_part_query.get(parent_query.root_ancestor(pair.0)).unwrap().1.color)
-            );
+            let colored_mat = StandardMaterial::from_color(base_part_query.get(parent_query.root_ancestor(pair.0)).unwrap().1.color);
+            let colored_mat_handle = materials.add(colored_mat);
+            // materials.insert(pair.2.id(),
+            //     colored_mat.clone()
+            // );
+            pair.2.0 = colored_mat_handle.clone();
+            commands.entity(pair.0)
+                .observe(update_material_on::<Pointer<Over>>(hovered_mat_handle.clone()))
+                .observe(update_material_on::<Pointer<Out>>(colored_mat_handle))
+            ;
         }
     }
 
@@ -112,13 +121,13 @@ fn generate_adjustable_hull_mesh(mesh: &mut Mesh, /* base_part: BasePart, */ adj
     //println!("indices is {:?}",indices);
     for i in 1..(resolution) {
         let index = (i) as u32;
-        //indices.extend_from_slice(&[index+(lengths)-1,index,index-1]);
-        //indices.extend_from_slice(&[index+lengths-1,index+lengths,index]);
+        indices.extend_from_slice(&[index+(lengths)-1, index,        index-1]);
+        indices.extend_from_slice(&[index+(lengths)-1, index+lengths,index  ]);
     }
 
     let index = 0;
-    //indices.extend_from_slice(&[(lengths)+(lengths-2),index,lengths-2]);
-    //indices.extend_from_slice(&[(lengths)+(lengths-2),index+lengths,index]);
+    indices.extend_from_slice(&[(lengths-1)+(lengths)-1, index,         (lengths-1)-1]);
+    indices.extend_from_slice(&[(lengths-1)+(lengths)-1, index+lengths, index]);
 
 
 
@@ -142,10 +151,11 @@ fn adjustable_hull_side(adjustable_hull: &AdjustableHull, resolution: usize, fro
     let half_width = (if front {adjustable_hull.front_width} else {adjustable_hull.back_width} )*0.5;
     let half_spread = (if front {adjustable_hull.front_spread} else {adjustable_hull.back_spread})*0.5;
     let height_multiplier = if front {adjustable_hull.height_scale*adjustable_hull.height*0.5} else {adjustable_hull.height*0.5};
-    let max_height = adjustable_hull.height*0.5;
-    let height_offset = adjustable_hull.height_offset*max_height;
+    let max_half_height = adjustable_hull.height*0.5;
+    let height_offset = if front {adjustable_hull.height_offset*adjustable_hull.height} else {0.0};
 
-    //println!("the adjustable_hull is {:?}",adjustable_hull);
+    //println!("=======================================the adjustable_hull is {:?}",adjustable_hull);
+    //println!("=======================================the frontness is {:?}",front);
     //len 1 height 4.7 forward width 0.25 backward width 2.65 forward spread 0.765 backwardspread 1.02 height scale 0.94175 height offset 0.01912 top roundness 0 bottom roundness 1
     //90 180 0
 
@@ -154,7 +164,7 @@ fn adjustable_hull_side(adjustable_hull: &AdjustableHull, resolution: usize, fro
         let cos_angle = f32::cos(angle);
         let sin_angle = f32::sin(angle);
 
-        println!("calced the cos and sin of {} ({}), which was {} and {}",angle,(i as f32/resolution as f32),cos_angle,sin_angle);
+        //println!("calced the cos and sin of {} ({}), which was {} and {}",angle,(i as f32/resolution as f32),cos_angle,sin_angle);
 
         let multiplier: f32 = f32::lerp(
             1.0 / f32::max(f32::abs(sin_angle),f32::abs(cos_angle)),
@@ -162,16 +172,17 @@ fn adjustable_hull_side(adjustable_hull: &AdjustableHull, resolution: usize, fro
             if sin_angle>0.0 {adjustable_hull.top_roundness} else {adjustable_hull.bottom_roundness}
         );
 
-        //println!("we are at {} and {} which is multiplied by {} which multiplied by {}",sin_angle,height_fraction,cos_angle.signum(),half_spread);
+        //println!("the height {} percentage is {} and the cosangle is {} but times multiplier is {} and the lerp is from {} to {} ", sin_angle*multiplier,((sin_angle*multiplier)/2.0)+0.5,cos_angle,cos_angle*multiplier,half_width,half_width+half_spread);
 
         
 
         //vertices.push([(cos_angle*multiplier*half_width)+(cos_angle.signum()*(((sin_angle/2.0)+1.0)*half_spread)), f32::clamp((sin_angle*multiplier*height_multiplier)+height_offset,-max_height,max_height), (if front {0.5} else {-0.5})*adjustable_hull.length]);
         vertices.push([
-            cos_angle*multiplier*f32::lerp(half_width,half_width+half_spread,((sin_angle/2.0)+0.5)),
-            (sin_angle*multiplier*height_multiplier)+height_offset,
+            cos_angle*multiplier*f32::lerp(half_width,half_width+half_spread,((sin_angle*multiplier)/2.0)+0.5),
+            f32::clamp((sin_angle*multiplier*height_multiplier)+height_offset,-max_half_height,max_half_height),
             (if front {0.5} else {-0.5})*adjustable_hull.length
         ]);
+        //println!("the result is {:?}",vertices.last().unwrap());
         //println!("adding the {}, {}, 0.0 to vertices",cos_angle*multiplier,sin_angle*multiplier);
     }
 
