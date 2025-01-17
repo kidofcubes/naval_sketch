@@ -1,12 +1,12 @@
 use core::f32;
-use std::{iter::once, ops::DerefMut};
+use std::{collections::VecDeque, iter::once, ops::DerefMut};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{Dir3, EulerRot, Quat, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, HierarchyQueryExt, KeyCode, Local, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, Ref, RemovedComponents, Res, ResMut, Resource, Text, Transform, Trigger, With}, reflect::List, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::default};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{Dir3, EulerRot, Isometry3d, Quat, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
 use bevy_mod_outline::OutlineVolume;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{parsing::BasePart, parts::{base_part_to_bevy_transform, unity_to_bevy_translation}};
+use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, spawn_ui, update_command_text, update_selected, CommandDisplayData}, parsing::BasePart, parts::{base_part_to_bevy_transform, unity_to_bevy_translation, BasePartMesh}};
 
 pub struct EditorPlugin;
 
@@ -15,13 +15,31 @@ impl Plugin for EditorPlugin {
         app.insert_resource(
             EditorData {
                 action_history: Vec::new(),
+                queued_commands: Vec::new(),
+                floating: false
             }
         );
+        
+    
+        let mut command_tree = CommandTree::default();
+        command_tree.add_command(b"w");
+        command_tree.add_command(b"a");
+        command_tree.add_command(b"s");
+        command_tree.add_command(b"d");
+        command_tree.add_command(b"W");
+        command_tree.add_command(b"A");
+        command_tree.add_command(b"S");
+        command_tree.add_command(b"D");
+
+        command_tree.add_command(b"f");
+        command_tree.add_command(b"F");
+
         app.insert_resource(
             CommandData {
-                command_history: Vec::new(),
+                command_history: VecDeque::new(),
                 current_byte_index: 0,
                 current_command: Vec::new(),
+                commands: command_tree
             }
         );
         app.insert_resource(
@@ -29,229 +47,223 @@ impl Plugin for EditorPlugin {
                 mult: -1.0,
                 font_size: -1.0,
                 font_width: -1.0,
-                text_display: None,
+                input_text_display: None,
                 flasher: None,
+                history_text_display: None,
             }
         );
         app.add_observer(on_hover);
         app.add_observer(on_unhover);
         app.add_observer(on_click);
         app.add_systems(Startup, (spawn_ui));
-        app.add_systems(Update, (update_selected, on_part_changed, command_typing, update_command_text));
+        app.add_systems(Update, (translate_floatings, update_selected, on_part_changed, command_typing, update_command_text, execute_queued_commands));
     }
 }
 
 #[derive(Resource)]
 pub struct EditorData {
     action_history: Vec<Action>,
+    queued_commands: Vec<QueuedCommand>, //use deque?
+    floating: bool
 }
 
 #[derive(Resource)]
 pub struct CommandData {
-    command_history: Vec<String>,
-    current_byte_index: usize,
-    current_command: Vec<u8>,
+    pub command_history: VecDeque<String>,
+    pub current_byte_index: usize,
+    pub current_command: Vec<u8>,
+    pub commands: CommandTree,
 }
 
-#[derive(Resource)]
-pub struct CommandDisplayData {
-    mult: f32,
-    font_size: f32,
-    font_width: f32,
-    text_display: Option<Entity>,
-    flasher: Option<Entity>,
+pub struct CommandTree {
+    is_command: bool,
+    continuations: HashMap<u8,Box<CommandTree>>
 }
+
+impl Default for CommandTree {
+    fn default() -> Self {
+        CommandTree {
+            is_command: false,
+            continuations: HashMap::new()
+
+        }
+    }
+}
+
+impl CommandTree {
+    fn add_command(&mut self, command_string: &[u8]) {
+        if command_string.is_empty() {
+            self.is_command=true;
+        }else{
+            self.continuations.try_insert(command_string[0], Box::new(CommandTree::default()));
+            self.continuations.get_mut(&command_string[0]).unwrap().add_command(&command_string[1..]);
+        }
+    }
+    fn has_command(&self, command_string: &[u8]) -> (bool, bool){
+        if command_string.is_empty() {
+            return (true, self.is_command);
+        }
+        if let Some(next) = self.continuations.get(&command_string[0]) {
+            return next.has_command(&command_string[1..]);
+        }
+        return (false, false);
+    }
+}
+
+
 
 #[derive(Component)]
 pub struct Selected {}
 
 pub struct Action {
     affected_entities: Vec<u64>,
-    change: Change,
+    
+
+    
+    //change: Change,
+} 
+
+struct QueuedCommand {
+    multiplier: f32,
+    command: String
 }
+// pub enum Change {
+//     SetTranslation(Vec3),
+// }
 
 
-pub enum Change {
-    SetTranslation(Vec3),
-}
 
-fn on_click(
-    click: Trigger<Pointer<Down>>,
-    part_query: Query<&BasePart>,
-    parent_query: Query<&Parent>,
-    children_query: Query<&Children>,
-    mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    selected: Query<Entity, With<Selected>>,
-    mut commands: Commands,
-){
-    if click.event().button != PointerButton::Primary {
-        return;
-    }
-    if let Some(clicked) = get_base_part_entity(&parent_query, &part_query, click.entity()) {
-        for thing in &selected {
-            commands.entity(thing).remove::<Selected>();
-        }
-        
-        commands.entity(clicked).insert(Selected{});
-    };
-}
-
-fn on_hover(
-    hover: Trigger<Pointer<Over>>,
-    part_query: Query<&BasePart>,
-    parent_query: Query<&Parent>,
-    children_query: Query<&Children>,
-    mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-){
-
-    // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
-    for base_entity in once(hover.entity()).chain(parent_query.iter_ancestors(hover.entity())) {
-        if let Ok(base_part) = part_query.get(base_entity) {
-            for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
-                if let Ok(mut material) = material_query.get_mut(entity) {
-                    material.0 = materials.add(StandardMaterial::from_color(base_part.color.with_luminance(base_part.color.luminance()*2.0)));
-                }
-            }
-            break;
-        }
-    };
-}
-
-fn on_unhover(
-    unhover: Trigger<Pointer<Out>>,
-    part_query: Query<&BasePart>,
-    parent_query: Query<&Parent>,
-    children_query: Query<&Children>,
-    mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-
-){
-    // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
-    for base_entity in once(unhover.entity()).chain(parent_query.iter_ancestors(unhover.entity())) {
-        if let Ok(base_part) = part_query.get(base_entity) {
-            for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
-                if let Ok(mut material) = material_query.get_mut(entity) {
-                    material.0 = materials.add(StandardMaterial::from_color(base_part.color));
-                }
-            }
-            break;
-        }
-    };
-}
-
-fn get_base_part_entity(parent_query: &Query<&Parent>, part_query: &Query<&BasePart>, entity: Entity) -> Option<Entity>{
-    // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
-    for base_entity in once(entity).chain(parent_query.iter_ancestors(entity)) {
-        if part_query.get(base_entity).is_ok() {
-            return Some(base_entity);
-        }
-    };
-    return None;
-}
-
-fn update_selected(
-    children_query: Query<&Children>,
-    material_query: Query<Entity, With<Mesh3d>>,
-    added: Query<Entity, (With<BasePart>, Added<Selected>)>,
-    mut removed: RemovedComponents<Selected>,
-    mut commands: Commands,
-){
-    removed.read().for_each(|base_entity| {
-        for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
-            if material_query.contains(entity) {
-                commands.entity(entity).remove::<OutlineVolume>();
-            }
-        }
-    });
-
-    for base_entity in &added {
-        for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
-            if material_query.contains(entity) {
-                commands.entity(entity).insert(
-                    OutlineVolume {
-                        visible: true,
-                        width: 5.0,
-                        colour: Color::srgba_u8(0, 255, 0, 255),
-                        ..default()
-                    }
-                );
-            }
-        }
-    }
-}
-
-fn on_update(
+fn execute_queued_commands(
+    mut editor_data: ResMut<EditorData>,
+    mut command_data: ResMut<CommandData>,
+    mut selected: Query<&mut BasePart, With<Selected>>,
+    camera_transform: Query<&Transform, With<Camera3d>>,
     key: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut BasePart, With<Selected>>
 ){
-}
+    let mut flip_floating = false;
+    for queued_command in &editor_data.queued_commands {
+        match queued_command.command.as_str() {
+            "w" => move_selected_relative_dir(&mut selected, &camera_transform, &Dir3::NEG_Z, queued_command.multiplier),
+            "a" => move_selected_relative_dir(&mut selected, &camera_transform, &Dir3::NEG_X, queued_command.multiplier),
+            "s" => move_selected_relative_dir(&mut selected, &camera_transform, &Dir3::Z, queued_command.multiplier),
+            "d" => move_selected_relative_dir(&mut selected, &camera_transform, &Dir3::X, queued_command.multiplier),
+            "F" => {flip_floating=true;}
+            _ => {}
+        }
 
-fn on_part_changed(
-    mut changed_base_part: Query<(&mut Transform, Ref<BasePart>), Changed<BasePart>>,
-){
-    for mut pair in &mut changed_base_part {
-        println!("THE THING CHANGED OH MAI GAH {:?}",pair);
-        let new_transform =
-            base_part_to_bevy_transform(&pair.1);
-        pair.0.translation = new_transform.translation;
-        pair.0.rotation = new_transform.rotation;
-        pair.0.scale = new_transform.scale;
+        let mut history: String= String::new();
+        if queued_command.multiplier!=1.0 {
+            history.push_str(&queued_command.multiplier.to_string());
+        }
+        history.push_str(&queued_command.command);
+        command_data.command_history.push_front(history);
+    }
+    command_data.command_history.truncate(100);
+    editor_data.queued_commands.clear();
+
+    if flip_floating {
+        editor_data.floating=!editor_data.floating;
     }
 }
 
-/// Spawn a bit of UI text to explain how to move the player.
-pub fn spawn_ui(
-    asset_server: Res<AssetServer>,
-    mut font_data: ResMut<CommandDisplayData>,
-    mut commands: Commands
+pub fn translate_floatings(
+    editor_data: Res<EditorData>,
+    camera_query: Single<(&Camera, &GlobalTransform)>,
+    windows: Single<&Window>,
+    mut ray_cast: MeshRayCast,
+    mut gizmos: Gizmos,
+    mut selected_query: Query<&mut Transform, With<Selected>>,
+    base_part_mesh_query: Query<&BasePartMesh>,
 ) {
-    font_data.mult = 4.0;
-    font_data.font_size = 13.0;
-    font_data.font_width = 6.0;
-    commands
-        .spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        })
-        .with_children(|parent| {
-            font_data.text_display = Some(
-                parent.spawn_empty().insert((
-                    Text::new("vimming times"),
-                    TextFont {
-                        font: asset_server.load("/usr/share/fonts/TTF/CozetteVector.ttf"),
-                        font_size: font_data.font_size*font_data.mult, 
-                        ..default()
-                    },
-                )).id()
-            );
+    let (camera, camera_transform) = *camera_query;
+
+    let Some(cursor_position) = windows.cursor_position() else {
+        return;
+    };
+
+    // Calculate a ray pointing from the camera into the world based on the cursor's position.
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+        return;
+    };
+
+    let Some((_, hit)) = ray_cast.cast_ray(ray, &RayCastSettings {
+        filter: &|entity| -> bool {
+            if editor_data.floating {
+                if let Ok(base_part_mesh) = base_part_mesh_query.get(entity) {
+                    if selected_query.contains(base_part_mesh.base_part) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        },
+        ..default()
+    }).first() else {
+        return;
+    };
 
 
-            font_data.flasher = Some(
-                parent.spawn_empty().insert((
-                    Node {
-                        // Take the size of the parent node.
-                        width: Val::Px(1.0*font_data.mult),
-                        height: Val::Px(font_data.font_size*font_data.mult),
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(font_data.font_width*font_data.mult*5.0),
-                        bottom: Val::Px(0.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba_u8(255,255,255,255))
-                )).id()
-            );
+    if editor_data.floating {
+        let mut average_pos = Vec3::ZERO;
 
-        })
-    ;
+        for transform in &selected_query {
+            average_pos+=transform.translation;
+        }
+        average_pos/=selected_query.iter().len() as f32;
+
+        let translation = hit.point-average_pos;
+        println!("TRANSOFMRMED EVERYTHING BY {:?}",translation);
+        for mut transform in &mut selected_query {
+            transform.translation.x+=translation.x;
+            transform.translation.y+=translation.y;
+            transform.translation.z+=translation.z;
+        }
+    }
+
+
+
+
+
+    // Draw a circle just above the ground plane at that position.
+    // gizmos.circle(
+    //     Isometry3d::new(
+    //         hit.point,
+    //         Quat::from_rotation_arc(Vec3 {x:1.0,y:0.0,z:0.0},hit.normal.normalize()),
+    //     ),
+    //     0.2,
+    //     Color::srgb_u8(255, 0, 0),
+    // );
+    // gizmos.circle(
+    //     Isometry3d::new(
+    //         hit.point,
+    //         Quat::from_rotation_arc(Vec3 {x:0.0,y:1.0,z:0.0},hit.normal.normalize()),
+    //     ),
+    //     0.2,
+    //     Color::srgb_u8(0, 255, 0),
+    // );
+    // gizmos.circle(
+    //     Isometry3d::new(
+    //         hit.point,
+    //         Quat::from_rotation_arc(Vec3 {x:0.0,y:0.0,z:1.0},hit.normal.normalize()),
+    //     ),
+    //     0.2,
+    //     Color::srgb_u8(0, 0, 255),
+    // );
+    // gizmos.arrow(
+    //     hit.point,
+    //     hit.point+hit.normal.normalize(),
+    //     Color::WHITE,
+    // );
 }
+
+
+
+
 
 
 fn command_typing(
     mut command_data: ResMut<CommandData>,
+    mut editor_data: ResMut<EditorData>,
     input_events: Res<Events<KeyboardInput>>,
     input_reader: Local<EventCursor<KeyboardInput>>,
 ){
@@ -271,14 +283,41 @@ fn command_typing(
 
                 let string = String::from_utf8(command_data.current_command.clone()).unwrap();
 
-                let regex: Regex = Regex::new(r"^(\d+(\.\d+)?)?([a-zA-Z]+)$").unwrap();
+                let regex: Regex = Regex::new(r"^(\d+(\.\d*)?)?([a-zA-Z]+)?$").unwrap();
                 if regex.is_match(&string) {
                     let captures = regex.captures(&string).unwrap();
                     let num = captures.get(1);
                     let command = captures.get(3);
-                    println!("WE GOT A COMMAND {:?}*{:?}",num,command);
-                }
+                    if let Some(command_match) = command {
+                        let mut mult: f32 = 1.0;
+                        if let Some(num_match) = num{
+                            if let Ok(num) = num_match.as_str().parse::<f32>() {
+                                mult = num;
+                            }
+                        }
 
+                        let is_command = command_data.commands.has_command(command_match.as_str().as_bytes());
+                        
+                        if is_command.0 {
+                            if is_command.1 {
+                                editor_data.queued_commands.push(
+                                    QueuedCommand {
+                                        multiplier: mult,
+                                        command: command_match.as_str().to_string(),
+                                    }
+                                );
+                                command_data.current_byte_index=0;
+                                command_data.current_command.clear();
+                            }
+                        }else{
+                            command_data.current_byte_index=0;
+                            command_data.current_command.clear();
+                        }
+                    }
+                }else{
+                    command_data.current_byte_index=0;
+                    command_data.current_command.clear();
+                }
             },
             Key::Space => {
                 // let index = command_data.current_byte_index;
@@ -319,29 +358,12 @@ fn command_typing(
     }
 }
 
-fn update_command_text(
-    command_data: Res<CommandData>,
-    command_display_data: Res<CommandDisplayData>,
-    mut text_query: Query<&mut Text>,
-    mut node_query: Query<&mut Node>,
-){
-    if command_data.is_changed()  {
-        text_query.get_mut(command_display_data.text_display.unwrap()).unwrap().0 =
-            String::from_utf8(command_data.current_command.clone()).unwrap();
-        // println!("text_display is {:?}",command_display_data.text_display);
-        // println!("text_query is {:?}",text_query.get_mut(command_display_data.text_display.unwrap()));
-        // println!("flasher is {:?}",command_display_data.flasher);
-        // println!("node_query is {:?}",node_query.get_mut(command_display_data.flasher.unwrap()));
-
-        node_query.get_mut(command_display_data.flasher.unwrap()).unwrap().left =
-            Val::Px(command_display_data.font_width * command_display_data.mult * (command_data.current_byte_index as f32))
-    }
-}
 
 
-fn move_selected_forwards(
-    mut selected: Query<&mut BasePart, With<Selected>>,
-    camera_transform: Query<&Transform, With<Camera3d>>,
+fn move_selected_relative_dir(
+    mut selected: &mut Query<&mut BasePart, With<Selected>>,
+    camera_transform: &Query<&Transform, With<Camera3d>>,
+    vector: &Vec3,
     multiplier: f32
 ){
     let mut rot = camera_transform.get_single().unwrap().rotation.to_euler(EulerRot::XYZ);
@@ -351,10 +373,10 @@ fn move_selected_forwards(
     rot.2 = (rot.2/f32::consts::FRAC_PI_2).round()*f32::consts::FRAC_PI_2;
 
     let translation = unity_to_bevy_translation(
-        &Quat::from_euler(EulerRot::XYZ, rot.0, rot.1, rot.2).mul_vec3(Dir3::Z.as_vec3())
+        &Quat::from_euler(EulerRot::XYZ, rot.0, rot.1, rot.2).mul_vec3(*vector)
     ) * multiplier;
 
-    for mut base_part in &mut selected {
+    for mut base_part in selected {
         base_part.position = base_part.position + translation;
     }
 }

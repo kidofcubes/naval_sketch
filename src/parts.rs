@@ -1,5 +1,5 @@
 use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::mesh::{Extrudable, Indices}, window::CursorGrabMode};
-use crate::cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text};
+use crate::{cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text}, editor_ui::get_base_part_entity};
 use crate::parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
 use core::f32;
 
@@ -118,6 +118,41 @@ pub fn adjustable_hull_side(adjustable_hull: &AdjustableHull, resolution: usize,
     return (vertices,indices);
 
 }
+#[derive(Component, Debug, Clone)]
+pub struct BasePartMeshes {
+    pub meshes: Vec<Entity>,
+}
+
+#[derive(Component, Debug, Copy, Clone)]
+pub struct BasePartMesh{
+    pub base_part: Entity,
+}
+
+pub fn on_part_meshes_init(
+    mesh_query: Query<Entity, Added<Mesh3d>>,
+    base_part_query: Query<&BasePart>,
+    parent_query: Query<&Parent>,
+    mut base_part_meshes_query: Query<&mut BasePartMeshes>,
+    mut commands: Commands,
+){
+    let mut temp = bevy::utils::HashMap::new();
+    for entity in &mesh_query {
+        println!("checking the new added mesh {:?}",entity);
+        if let Some(base_part_entity) = get_base_part_entity(&parent_query, &base_part_query, entity) {
+            if let Ok(base_part_meshes) = &mut base_part_meshes_query.get_mut(base_part_entity) {
+                base_part_meshes.meshes.push(entity);
+            }else{
+                temp.try_insert(base_part_entity, BasePartMeshes {meshes:Vec::new()});
+                temp.get_mut(&base_part_entity).unwrap().meshes.push(entity);
+            }
+            println!("added BasePartMesh to a mesh of {:?}",base_part_entity);
+            commands.get_entity(entity).unwrap().insert(BasePartMesh{base_part:base_part_entity});
+        }
+    }
+    for pair in temp {
+        commands.get_entity(pair.0).unwrap().insert(pair.1);
+    }
+}
 
 pub fn place_part(
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -160,8 +195,17 @@ pub fn place_part(
                  )
              ));
         }
+        let unwrapped = handle.unwrap();
+
+        // let thing = scene_assets.get(unwrapped.id()).unwrap();
+        //
+        // for scene_entity in thing.world.iter_entities() {
+        //     println!("wtfrick theres a {:?}",scene_entity.id());
+        // }
+
+        
         entity.insert(
-             SceneRoot(handle.unwrap())
+             SceneRoot(unwrapped)
         );
     }
 

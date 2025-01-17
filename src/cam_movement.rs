@@ -223,6 +223,7 @@ pub fn move_player(
     }
 
     translation+= transform.forward()*accumulated_mouse_scroll.delta.y;
+    translation+= transform.right()*accumulated_mouse_scroll.delta.x;
     transform.translation+=translation;
 }
 

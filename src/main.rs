@@ -1,6 +1,7 @@
 mod parsing;
 mod cam_movement;
 mod editor;
+mod editor_ui;
 mod parts;
 
 use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::mesh::{Extrudable, Indices}, window::CursorGrabMode};
@@ -8,7 +9,7 @@ use bevy_mod_outline::OutlinePlugin;
 use cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text, CameraMovementPlugin};
 use editor::EditorPlugin;
 use parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
-use parts::place_part;
+use parts::{on_part_meshes_init, place_part};
 use std::{cmp::{max, min}, env, f32::consts::FRAC_PI_2};
 
 
@@ -36,6 +37,7 @@ fn temp_test_update(
     mut query: Query<(Entity, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
     mut hull_query: Query<(Entity, &BasePart, &mut AdjustableHull)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut scenes: ResMut<Assets<Scene>>,
     parent_query: Query<&Parent>,
     mut base_part_query: Query<(Entity, &BasePart)>,
     mut commands: Commands
@@ -58,6 +60,15 @@ fn temp_test_update(
             // ;
         }
     }
+
+    // if scenes.is_changed() {
+    //     for scene in scenes.iter() {
+    //         for entity in scene.1.world.iter_entities() {
+    //             println!("the thing is {:?}",entity.id());
+    //         }
+    //     }
+    //
+    // }
 
     //if key.just_pressed(KeyCode::KeyJ) {
     //    for mut pair in &mut hull_query {
@@ -105,6 +116,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     init_data: Res<InitData>,
     asset_server: Res<AssetServer>,
+    //mut scene_assets: ResMut<Assets<Scene>>,
     mut ambient_light: ResMut<AmbientLight>,
 ) {
 
@@ -159,13 +171,13 @@ fn main() {
         .insert_resource(BuildData {mesh_thing: None})
         .add_plugins((
                 DefaultPlugins.build(),
-                //OutlinePlugin,
                 CameraMovementPlugin,
                 MeshPickingPlugin,
-                EditorPlugin
+                EditorPlugin,
+                //OutlinePlugin,
                 ))
         .add_systems(Startup, (setup))
-        .add_systems(Update, (temp_test_update))
+        .add_systems(Update, (temp_test_update, on_part_meshes_init))
 
 
         .run();
