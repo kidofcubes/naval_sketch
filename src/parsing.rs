@@ -133,7 +133,7 @@ impl Display for ParseError {
 impl std::error::Error for ParseError {}
 
 fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Result<String, Box<dyn std::error::Error>> {
-    println!("checking the {:?} which was {:?}", field_name, str::from_utf8(e.try_get_attribute(field_name)?.unwrap().value.as_ref()));
+    //println!("checking the {:?} which was {:?}", field_name, str::from_utf8(e.try_get_attribute(field_name)?.unwrap().value.as_ref()));
 
     return Ok(str::from_utf8(e.try_get_attribute(field_name)?
         .ok_or(ParseError{desc: format!("field missing").to_string()})?
@@ -143,7 +143,7 @@ fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Result<S
 pub fn load_save(file_path: &str) -> Result<Vec<Part>, Box<dyn Error>> {
     let xml = fs::read_to_string(file_path).expect("Should have been able to read the file");
 
-    println!("thing is {xml}");
+    //println!("thing is {xml}");
 
     let mut reader = Reader::from_str(xml.as_str());
     //reader.config_mut().trim_text(true);
@@ -232,7 +232,6 @@ pub fn load_save(file_path: &str) -> Result<Vec<Part>, Box<dyn Error>> {
                         current_part.base_part_mut().scale.z = get_attribute_string(&e, "z")?.parse::<f32>()?;
                     }
                     b"color" => {
-                        println!("color is {:?}",re.replace_all(&get_attribute_string(&e, "hex")?,""));
                         let color: u32 = u32::from_str_radix(re.replace_all(&get_attribute_string(&e, "hex")?,"").as_ref(), 16)?;
                         current_part.base_part_mut().color = Color::srgb_u8((color >> 16) as u8,(color >> 8) as u8,(color >> 0) as u8);
                     }
@@ -260,11 +259,6 @@ pub fn load_save(file_path: &str) -> Result<Vec<Part>, Box<dyn Error>> {
         }
         // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
         //buf.clear();
-    }
-    println!("JKLASDJFAKSD {:?}",parts.len());
-
-    for part in &parts {
-        println!("aaahhkajdfhkal {:?}",part);
     }
 
     return Ok(parts);

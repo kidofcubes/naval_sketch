@@ -5,8 +5,10 @@ edition = "2021"
 
 [dependencies]
 bevy = { version = "0.15.1", features = ["dynamic_linking", "wayland"] }
+bevy_mod_outline = "0.9.0"
 quick-xml = "0.37.2"
 regex = "1.11.1"
+smol_str = "*"
 
 # Enable max optimizations for dependencies, but not for our code:
 [profile.dev.package."*"]

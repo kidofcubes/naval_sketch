@@ -1,4 +1,4 @@
-use bevy::{asset::RenderAssetUsages, color::Color, input::mouse::AccumulatedMouseMotion, math::DVec2, pbr::ScreenSpaceAmbientOcclusion, prelude::*, render::mesh::Indices, window::CursorGrabMode};
+use bevy::{asset::RenderAssetUsages, color::Color, input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, math::DVec2, pbr::ScreenSpaceAmbientOcclusion, prelude::*, render::mesh::Indices, window::CursorGrabMode};
 use std::{env, f32::consts::FRAC_PI_2};
 
 /// A vector representing the player's input, accumulated over all frames that ran
@@ -23,6 +23,32 @@ pub struct PhysicalTranslation(Vec3);
 /// Used for interpolation in the `interpolate_rendered_transform` system.
 #[derive(Debug, Component, Clone, Copy, PartialEq, Default, Deref, DerefMut)]
 pub struct PreviousPhysicalTranslation(Vec3);
+
+pub struct CameraMovementPlugin;
+
+impl Plugin for CameraMovementPlugin {
+    fn build(&self, app: &mut App) {
+        app
+            .add_systems(Startup, spawn_player)
+            .add_systems(FixedUpdate, (advance_physics))
+            .add_systems(
+                // The `RunFixedMainLoop` schedule allows us to schedule systems to run before and after the fixed timestep loop.
+                RunFixedMainLoop,
+                (
+                    // The physics simulation needs to know the player's input, so we run this before the fixed timestep loop.
+                    // Note that if we ran it in `Update`, it would be too late, as the physics simulation would already have been advanced.
+                    // If we ran this in `FixedUpdate`, it would sometimes not register player input, as that schedule may run zero times per frame.
+                    handle_input.in_set(RunFixedMainLoopSystem::BeforeFixedMainLoop),
+                    // The player's visual representation needs to be updated after the physics simulation has been advanced.
+                    // This could be run in `Update`, but if we run it here instead, the systems in `Update`
+                    // will be working with the `Transform` that will actually be shown on screen.
+                    interpolate_rendered_transform.in_set(RunFixedMainLoopSystem::AfterFixedMainLoop),
+                ),
+            )
+            .add_systems(Update,(move_player,grab_mouse))
+        ;
+    }
+}
 
 /// Spawn the player sprite and a 2D camera.
 pub fn spawn_player(mut commands: Commands) {
@@ -74,24 +100,24 @@ pub fn handle_input(
     /// "How many pixels per second should the player move?"
     const SPEED: f32 = 100.0;
     for (mut input, mut velocity, mut transform) in query.iter_mut() {
-        if keyboard_input.pressed(KeyCode::KeyW) {
-            input.z -= 1.0;
-        }
-        if keyboard_input.pressed(KeyCode::KeyS) {
-            input.z += 1.0;
-        }
-        if keyboard_input.pressed(KeyCode::KeyA) {
-            input.x -= 1.0;
-        }
-        if keyboard_input.pressed(KeyCode::KeyD) {
-            input.x += 1.0;
-        }
-        if keyboard_input.pressed(KeyCode::Space) {
-            input.y += 1.0;
-        }
-        if keyboard_input.pressed(KeyCode::ShiftLeft) {
-            input.y -= 1.0;
-        }
+        // if keyboard_input.pressed(KeyCode::KeyW) {
+        //     input.z -= 1.0;
+        // }
+        // if keyboard_input.pressed(KeyCode::KeyS) {
+        //     input.z += 1.0;
+        // }
+        // if keyboard_input.pressed(KeyCode::KeyA) {
+        //     input.x -= 1.0;
+        // }
+        // if keyboard_input.pressed(KeyCode::KeyD) {
+        //     input.x += 1.0;
+        // }
+        // if keyboard_input.pressed(KeyCode::Space) {
+        //     input.y += 1.0;
+        // }
+        // if keyboard_input.pressed(KeyCode::ShiftLeft) {
+        //     input.y -= 1.0;
+        // }
 
         // Need to normalize and scale because otherwise
         // diagonal movement would be faster than horizontal or vertical movement.
@@ -136,29 +162,30 @@ pub fn interpolate_rendered_transform(
         &PreviousPhysicalTranslation,
     )>,
 ) {
-    for (mut transform, current_physical_translation, previous_physical_translation) in
-        query.iter_mut()
-    {
-        let previous = previous_physical_translation.0;
-        let current = current_physical_translation.0;
-        // The overstep fraction is a value between 0 and 1 that tells us how far we are between two fixed timesteps.
-        let alpha = fixed_time.overstep_fraction();
-
-        let rendered_translation = previous.lerp(current, alpha);
-        transform.translation = rendered_translation;
-    }
+    // for (mut transform, current_physical_translation, previous_physical_translation) in
+    //     query.iter_mut()
+    // {
+    //     let previous = previous_physical_translation.0;
+    //     let current = current_physical_translation.0;
+    //     // The overstep fraction is a value between 0 and 1 that tells us how far we are between two fixed timesteps.
+    //     let alpha = fixed_time.overstep_fraction();
+    //
+    //     let rendered_translation = previous.lerp(current, alpha);
+    //     transform.translation = rendered_translation;
+    // }
 }
 
 pub fn move_player(
     accumulated_mouse_motion: Res<AccumulatedMouseMotion>,
+    accumulated_mouse_scroll: Res<AccumulatedMouseScroll>,
     windows: Query<&mut Window>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut player: Query<(&mut Transform), With<Camera3d>>,
 ) {
     let mut window = windows.single();
-    if window.cursor_options.grab_mode != CursorGrabMode::Locked && !mouse.pressed(MouseButton::Right) {
-        return;
-    }
+    // if window.cursor_options.grab_mode != CursorGrabMode::Locked {
+    //     return;
+    // }
 
     let Ok(mut transform) = player.get_single_mut() else {
         return;
@@ -166,15 +193,15 @@ pub fn move_player(
 
     let delta = accumulated_mouse_motion.delta;
 
-    if delta != Vec2::ZERO {
+    if mouse.pressed(MouseButton::Right) {
         // Note that we are not multiplying by delta_time here.
         // The reason is that for mouse movement, we already get the full movement that happened since the last frame.
         // This means that if we multiply by delta_time, we will get a smaller rotation than intended by the user.
         // This situation is reversed when reading e.g. analog input from a gamepad however, where the same rules
         // as for keyboard input apply. Such an input should be multiplied by delta_time to get the intended rotation
         // independent of the framerate.
-        let delta_yaw = -delta.x * 0.005;
-        let delta_pitch = -delta.y * 0.005;
+        let delta_yaw = -delta.x * 0.0025;
+        let delta_pitch = -delta.y * 0.0025;
 
         let (yaw, pitch, roll) = transform.rotation.to_euler(EulerRot::YXZ);
         let yaw = yaw + delta_yaw;
@@ -190,6 +217,13 @@ pub fn move_player(
 
         transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
     }
+    let mut translation = Vec3::ZERO;
+    if mouse.pressed(MouseButton::Middle) {
+        translation += ((transform.left()*delta.x)+(transform.up()*delta.y))*0.01;
+    }
+
+    translation+= transform.forward()*accumulated_mouse_scroll.delta.y;
+    transform.translation+=translation;
 }
 
 pub fn grab_mouse(
@@ -199,23 +233,32 @@ pub fn grab_mouse(
 ) {
     let mut window = windows.single_mut();
 
-    if mouse.just_pressed(MouseButton::Left) {
-        window.cursor_options.visible = false;
-        window.cursor_options.grab_mode = CursorGrabMode::Locked;
-        let new_pos = Some(
-                DVec2 { x: window.physical_width() as f64/2.0, y: window.physical_height() as f64/2.0}
-            );
-        window.set_physical_cursor_position(new_pos);
-    }
+    // if mouse.just_pressed(MouseButton::Middle) {
+    //     window.cursor_options.visible = false;
+    //     window.cursor_options.grab_mode = CursorGrabMode::Locked;
+    // }
+    // if mouse.just_released(MouseButton::Middle) {
+    //     window.cursor_options.visible = true;
+    //     window.cursor_options.grab_mode = CursorGrabMode::None;
+    // }
 
-    if key.just_pressed(KeyCode::Escape) {
-        window.cursor_options.visible = true;
-        window.cursor_options.grab_mode = CursorGrabMode::None;
-        let new_pos = Some(
-                DVec2 { x: window.physical_width() as f64/2.0, y: window.physical_height() as f64/2.0}
-            );
-        window.set_physical_cursor_position(new_pos);
-    }
+    // if mouse.just_pressed(MouseButton::Left) {
+    //     window.cursor_options.visible = false;
+    //     window.cursor_options.grab_mode = CursorGrabMode::Locked;
+    //     let new_pos = Some(
+    //             DVec2 { x: window.physical_width() as f64/2.0, y: window.physical_height() as f64/2.0}
+    //         );
+    //     window.set_physical_cursor_position(new_pos);
+    // }
+    //
+    // if key.just_pressed(KeyCode::Escape) {
+    //     window.cursor_options.visible = true;
+    //     window.cursor_options.grab_mode = CursorGrabMode::None;
+    //     let new_pos = Some(
+    //             DVec2 { x: window.physical_width() as f64/2.0, y: window.physical_height() as f64/2.0}
+    //         );
+    //     window.set_physical_cursor_position(new_pos);
+    // }
 }
 
 
