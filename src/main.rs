@@ -10,7 +10,7 @@ use cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_render
 use editor::EditorPlugin;
 use parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
 use parts::{on_part_meshes_init, place_part};
-use std::{cmp::{max, min}, env, f32::consts::FRAC_PI_2};
+use std::{cmp::{max, min}, env, f32::consts::FRAC_PI_2, path::Path};
 
 
 
@@ -120,8 +120,9 @@ fn setup(
     mut ambient_light: ResMut<AmbientLight>,
 ) {
 
+    let path = init_data.file_path.clone();
 
-    let parts_result = load_save(&init_data.file_path);
+    let parts_result = load_save(Path::new(&path));
 
 
     if let Ok(parts) = parts_result {

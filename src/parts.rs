@@ -137,7 +137,6 @@ pub fn on_part_meshes_init(
 ){
     let mut temp = bevy::utils::HashMap::new();
     for entity in &mesh_query {
-        println!("checking the new added mesh {:?}",entity);
         if let Some(base_part_entity) = get_base_part_entity(&parent_query, &base_part_query, entity) {
             if let Ok(base_part_meshes) = &mut base_part_meshes_query.get_mut(base_part_entity) {
                 base_part_meshes.meshes.push(entity);
@@ -145,7 +144,6 @@ pub fn on_part_meshes_init(
                 temp.try_insert(base_part_entity, BasePartMeshes {meshes:Vec::new()});
                 temp.get_mut(&base_part_entity).unwrap().meshes.push(entity);
             }
-            println!("added BasePartMesh to a mesh of {:?}",base_part_entity);
             commands.get_entity(entity).unwrap().insert(BasePartMesh{base_part:base_part_entity});
         }
     }

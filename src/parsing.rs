@@ -1,5 +1,5 @@
 use core::str;
-use std::{borrow::BorrowMut, error::Error, fmt::Display, fs};
+use std::{borrow::BorrowMut, error::Error, fmt::Display, fs, path::Path};
 
 use bevy::{color::Color, math::Vec3, prelude::Component};
 use quick_xml::{events::{BytesStart, Event}, Reader};
@@ -121,7 +121,7 @@ impl HasBasePart for Part{
 }
 
 #[derive(Debug)]
-struct ParseError {
+pub struct ParseError {
     desc: String
 }
 impl Display for ParseError {
@@ -132,7 +132,7 @@ impl Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Result<String, Box<dyn std::error::Error>> {
     //println!("checking the {:?} which was {:?}", field_name, str::from_utf8(e.try_get_attribute(field_name)?.unwrap().value.as_ref()));
 
     return Ok(str::from_utf8(e.try_get_attribute(field_name)?
@@ -140,8 +140,8 @@ fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Result<S
         .value.as_ref())?.to_string());
 }
 
-pub fn load_save(file_path: &str) -> Result<Vec<Part>, Box<dyn Error>> {
-    let xml = fs::read_to_string(file_path).expect("Should have been able to read the file");
+pub fn load_save(file_path: &Path) -> Result<Vec<Part>, Box<dyn Error>> {
+    let xml = fs::read_to_string(&file_path).expect("Should have been able to read the file");
 
     //println!("thing is {xml}");
 

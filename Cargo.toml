@@ -2,12 +2,16 @@
 name = "naval_fart"
 version = "0.1.0"
 edition = "2021"
+default-run = "naval_fart"
 
 [dependencies]
 bevy = { version = "0.15.1", features = ["dynamic_linking", "wayland"] }
 bevy_mod_outline = "0.9.0"
+chrono = "0.4.39"
 quick-xml = "0.37.2"
 regex = "1.11.1"
+reqwest = { version = "0.12.12", features = ["blocking"] }
+saphyr = "0.0.3"
 smol_str = "*"
 
 # Enable max optimizations for dependencies, but not for our code:
@@ -18,3 +22,6 @@ opt-level = 3
 [profile.dev]
 opt-level = 1
 
+[[bin]]
+name = "asset_extractor"
+path = "src/asset_extractor.rs"
