@@ -14,6 +14,9 @@ pub struct PartRegistry {
 pub struct PartData {
     pub id: i32,
     pub armor: Option<i32>,
+    pub center: Vec3,
+    //collier is half lengths
+    pub collider: Vec3,
     pub model: PathBuf
 }
 

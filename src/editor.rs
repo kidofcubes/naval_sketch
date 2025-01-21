@@ -6,7 +6,7 @@ use bevy_mod_outline::OutlineVolume;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, spawn_ui, update_command_text, update_selected, CommandDisplayData}, parsing::BasePart, parts::{base_part_to_bevy_transform, unity_to_bevy_translation, BasePartMesh}};
+use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData}, parsing::BasePart, parts::{base_part_to_bevy_transform, unity_to_bevy_translation, BasePartMesh}};
 
 pub struct EditorPlugin;
 
@@ -56,7 +56,15 @@ impl Plugin for EditorPlugin {
         app.add_observer(on_unhover);
         app.add_observer(on_click);
         app.add_systems(Startup, (spawn_ui));
-        app.add_systems(Update, (translate_floatings, update_selected, on_part_changed, command_typing, update_command_text, execute_queued_commands));
+        app.add_systems(Update, (
+                translate_floatings,
+                update_selected,
+                on_part_changed,
+                command_typing,
+                update_command_text,
+                execute_queued_commands,
+                render_gizmos,
+        ));
     }
 }
 
@@ -135,9 +143,6 @@ struct QueuedCommand {
 #[derive(Component, Debug, Copy, Clone)]
 #[require(BasePart)]
 struct EditorPart {
-    center: Vec3,
-    //collier is half lengths
-    collider: Vec3
 }
 
 

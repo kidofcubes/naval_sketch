@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, env, error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, ReadDir}, mem, path::{Path, PathBuf}, time::Duration};
 
-use bevy::{reflect::List, utils::HashMap};
+use bevy::{math::Vec3, reflect::List, utils::HashMap};
 use quick_xml::{events::{BytesStart}, Reader};
 
 use regex::Regex;
@@ -57,15 +57,41 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
             return (file_id.as_i64()==Some(11500000))&&(guid.as_str()==Some("025b32fee4a7141deb25f3720956b98b"))&&(type_num.as_i64()==Some(3));
         }).next().unwrap().1;
 
+        let box_collider = &prefab.components.iter().filter(|pair| {
+            return pair.0 == "BoxCollider"
+        }).next().unwrap().1;
+
+
 
         parts.push( PartData {
             id: part_mono_behaviour.get("id").unwrap().as_i64().unwrap() as i32,
             armor: Some(part_mono_behaviour.get("armor").unwrap().as_i64().unwrap() as i32),
             model: model_path,
+            collider: vec3_from_yaml(box_collider.get("m_Size").unwrap()),
+            center: vec3_from_yaml(box_collider.get("m_Center").unwrap()),
         });
     }
 
     return parts;
+}
+
+
+
+fn vec3_from_yaml(yaml: &Yaml) -> Vec3{
+    return Vec3 {
+        x: get_as_f32(yaml.as_hash().unwrap().get(&Yaml::from_str("x")).unwrap()),
+        y: get_as_f32(yaml.as_hash().unwrap().get(&Yaml::from_str("y")).unwrap()),
+        z: get_as_f32(yaml.as_hash().unwrap().get(&Yaml::from_str("z")).unwrap()),
+    };
+}
+fn get_as_f32(value: &Yaml) -> f32{
+    if let Yaml::Integer(num) = value {
+        return num.clone() as f32;
+    }else{
+        return value.as_f64().unwrap() as f32;
+
+    }
+
 }
 
 
@@ -176,6 +202,10 @@ pub fn get_workshop_parts(workshop_folder: &Path, cache_folder: &Path) -> Vec<Pa
             }).next().unwrap().1;
 
             //println!("the MonoBehaviour is {:?}",part_mono_behaviour);
+            //
+            let box_collider = &prefab.components.iter().filter(|pair| {
+                return pair.0 == "BoxCollider"
+            }).next().unwrap().1;
             
             let model_path = models_dir.join(prefab_path.file_stem().unwrap().to_str().unwrap().to_owned()+".glb");
             if model_path.exists() {
@@ -183,6 +213,8 @@ pub fn get_workshop_parts(workshop_folder: &Path, cache_folder: &Path) -> Vec<Pa
                     id: part_mono_behaviour.get("id").unwrap().as_i64().unwrap() as i32,
                     armor: Some(part_mono_behaviour.get("armor").unwrap().as_i64().unwrap() as i32),
                     model: model_path,
+                    collider: vec3_from_yaml(box_collider.get("m_Size").unwrap()),
+                    center: vec3_from_yaml(box_collider.get("m_Center").unwrap()),
                 });
             }
         }

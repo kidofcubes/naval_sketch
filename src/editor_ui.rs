@@ -5,7 +5,7 @@ use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::
 use bevy_mod_outline::OutlineVolume;
 use regex::Regex;
 
-use crate::{editor::{CommandData, Selected}, parsing::BasePart, parts::{base_part_to_bevy_transform, unity_to_bevy_translation}};
+use crate::{editor::{CommandData, Selected}, parsing::{AdjustableHull, BasePart}, parts::{base_part_to_bevy_transform, unity_to_bevy_translation, PartRegistry}};
 
 
 #[derive(Resource)]
@@ -91,6 +91,40 @@ pub fn spawn_ui(
 
 
 
+#[derive(Component)]
+pub struct Hovered{}
+
+pub fn render_gizmos(
+    hovered: Query<(&BasePart,Option<&AdjustableHull>),With<Hovered>>,
+    part_registry: Res<PartRegistry>,
+    mut gizmos: Gizmos
+){
+    for hovered in &hovered {
+        let part_data = part_registry.parts.get(&hovered.0.id).unwrap();
+        let mut transform = base_part_to_bevy_transform(hovered.0);
+        transform.translation += unity_to_bevy_translation(&part_data.center);
+        transform.scale = part_data.collider * hovered.0.scale;
+        //let mut transform = Transform::from_translation(unity_to_bevy_translation(&(hovered.0.position+part_data.center))).with_scale(part_data.collider);
+        if let Some(adjustable_hull) = hovered.1 {
+            transform.scale = transform.scale * Vec3 {
+                x: f32::max(adjustable_hull.back_width+adjustable_hull.back_spread,adjustable_hull.front_width+adjustable_hull.front_spread),
+                y: adjustable_hull.height,
+                z: adjustable_hull.length
+            }/6.0;
+
+        }else{
+
+        }
+        
+        gizmos.cuboid(
+            transform,
+            Color::srgb_u8(0, 255, 0)
+        );
+    }
+    
+
+
+}
 
 
 
@@ -132,11 +166,14 @@ pub fn on_hover(
     children_query: Query<&Children>,
     mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
 ){
 
     // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
+
     for base_entity in once(hover.entity()).chain(parent_query.iter_ancestors(hover.entity())) {
         if let Ok(base_part) = part_query.get(base_entity) {
+            commands.entity(base_entity).insert(Hovered{});
             for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
                 if let Ok(mut material) = material_query.get_mut(entity) {
                     material.0 = materials.add(StandardMaterial::from_color(base_part.color.with_luminance(base_part.color.luminance()*2.0)));
@@ -154,11 +191,12 @@ pub fn on_unhover(
     children_query: Query<&Children>,
     mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-
+    mut commands: Commands,
 ){
     // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
     for base_entity in once(unhover.entity()).chain(parent_query.iter_ancestors(unhover.entity())) {
         if let Ok(base_part) = part_query.get(base_entity) {
+            commands.entity(base_entity).remove::<Hovered>();
             for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
                 if let Ok(mut material) = material_query.get_mut(entity) {
                     material.0 = materials.add(StandardMaterial::from_color(base_part.color));
