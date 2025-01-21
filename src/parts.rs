@@ -1,7 +1,45 @@
-use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::mesh::{Extrudable, Indices}, window::CursorGrabMode};
-use crate::{cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text}, editor_ui::get_base_part_entity};
+use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::mesh::{Extrudable, Indices}, utils::HashMap, window::CursorGrabMode};
+use dirs::cache_dir;
+use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text}, editor_ui::get_base_part_entity};
 use crate::parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
 use core::f32;
+use std::{fs::create_dir_all, path::{Path, PathBuf}};
+
+
+#[derive(Resource)]
+pub struct PartRegistry {
+    pub parts: HashMap<i32,PartData>
+}
+
+pub struct PartData {
+    pub id: i32,
+    pub armor: Option<i32>,
+    pub model: PathBuf
+}
+
+pub fn register_all_parts(
+    mut part_registry: ResMut<PartRegistry>
+){
+    let cache_folder = cache_dir().unwrap().join("naval_fart");
+    let steam_folder = PathBuf::from("/home/kidofcubes/.local/share/Steam/");
+    let workshop_folder = steam_folder.join("steamapps").join("workshop").join("content").join("842780");
+    let game_folder = steam_folder.join("steamapps").join("common").join("NavalArt");
+    create_dir_all(&cache_folder).unwrap();
+
+    let workshop_parts = get_workshop_parts(&workshop_folder, &cache_folder);
+    for workshop_port in workshop_parts {
+        part_registry.parts.insert(workshop_port.id,workshop_port);
+    }
+
+    let builtin_parts = get_builtin_parts(&game_folder, &cache_folder);
+    for builtin_part in builtin_parts {
+        part_registry.parts.insert(builtin_part.id,builtin_part);
+    }
+
+    println!("all registered parts is {:?}",part_registry.parts.keys());
+
+}
+
 
 
 pub fn generate_adjustable_hull_mesh(mesh: &mut Mesh, adjustable_hull: &AdjustableHull) {
@@ -156,6 +194,7 @@ pub fn place_part(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     asset_server: &Res<AssetServer>,
+    part_registry: &Res<PartRegistry>,
     commands: &mut Commands,
     part: &Part
 ){
@@ -184,7 +223,10 @@ pub fn place_part(
             MeshMaterial3d(materials.add(base_part.color))
         ));
     }else{
-        let asset_path = AssetPath::from(format!("/home/kidofcubes/Downloads/AssetRipper_linux_x64/NavalArtOut/PrefabHierarchyObject/{}.glb",part.base_part().id));
+        //let asset_path = AssetPath::from(format!("/home/kidofcubes/Downloads/AssetRipper_linux_x64/NavalArtOut/PrefabHierarchyObject/{}.glb",part.base_part().id));
+         println!("looking for part with id {:?}",&part.base_part().id);
+         println!("loaded parts are {:?}",part_registry.parts.keys());
+        let asset_path = AssetPath::from(part_registry.parts.get(&part.base_part().id).unwrap().model.clone());
         let mut handle = asset_server.get_handle(&asset_path);
         if handle.is_none() {
             handle = Some(asset_server.load(

@@ -17,6 +17,7 @@ pub struct BasePart {
 }
 
 #[derive(Component, Debug, Copy, Clone)]
+#[require(BasePart)]
 pub struct AdjustableHull {
     pub length: f32,
     pub height: f32,
@@ -31,9 +32,10 @@ pub struct AdjustableHull {
 }
 
 #[derive(Component, Debug, Copy, Clone)]
+#[require(BasePart)]
 pub struct Turret{
     pub manual_control: bool,
-    pub elevator: f32,
+    pub elevator: Option<f32>,
 }
 
 
@@ -85,7 +87,7 @@ impl Default for Turret{
     fn default() -> Turret{
         Turret {
             manual_control: true,
-            elevator: 0.0
+            elevator: None
         }
     }
 }
@@ -136,7 +138,7 @@ pub fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Resu
     //println!("checking the {:?} which was {:?}", field_name, str::from_utf8(e.try_get_attribute(field_name)?.unwrap().value.as_ref()));
 
     return Ok(str::from_utf8(e.try_get_attribute(field_name)?
-        .ok_or(ParseError{desc: format!("field missing").to_string()})?
+        .ok_or(ParseError{desc: format!("field {:?} missing from {:?}",field_name,e).to_string()})?
         .value.as_ref())?.to_string());
 }
 
@@ -213,7 +215,9 @@ pub fn load_save(file_path: &Path) -> Result<Vec<Part>, Box<dyn Error>> {
                         }
                         if let Part::Turret(_,turret) = &mut current_part {
                             turret.manual_control = get_attribute_string(&e, "manualControl")?.to_lowercase().parse::<bool>()?;
-                            turret.elevator = get_attribute_string(&e, "evevator")?.parse::<f32>()?;
+                            if let Ok(elevator_string) = get_attribute_string(&e, "evevator"){
+                                turret.elevator = Some(elevator_string.parse::<f32>()?);
+                            }
                         }
                     }
                     b"position" => {

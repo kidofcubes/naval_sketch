@@ -1,33 +1,78 @@
-mod parsing;
 use std::{collections::BTreeMap, env, error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, ReadDir}, mem, path::{Path, PathBuf}, time::Duration};
 
 use bevy::{reflect::List, utils::HashMap};
-use parsing::{get_attribute_string, ParseError};
 use quick_xml::{events::{BytesStart}, Reader};
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use regex::Regex;
-use yaml_rust2::{parser::{EventReceiver, MarkedEventReceiver, Parser, Tag}, scanner::{Marker, TScalarStyle}, yaml::Hash, Event, ScanError, Yaml, YamlLoader};
+use yaml_rust2::Yaml;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
+use crate::{parsing::get_attribute_string, parts::PartData};
 
-    let steam_folder = Path::new(&args[1]);
-    let out_folder = Path::new(&args[2]);
+pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartData> {
+    let mut parts: Vec<PartData> = Vec::new();
+    let unity_project_dir = cache_folder.join("naval_art").join("unity_project_extracted");
+    let primary_content_dir = cache_folder.join("naval_art").join("primary_content_extracted");
 
-    let workshop_folder = steam_folder.join("steamapps/workshop/content/842780/");
-    let game_folder = steam_folder.join("steamapps/common/NavalArt/");
+    if (!Path::exists(&unity_project_dir)) || (!Path::exists(&primary_content_dir)) {
+        load_folder(game_folder);
+    }
+    if !Path::exists(&unity_project_dir) {
+        create_dir_all(unity_project_dir.clone()).unwrap();
+        extract_unity_project_to(&unity_project_dir);
+    }
+    if !Path::exists(&primary_content_dir) {
+        create_dir_all(primary_content_dir.clone()).unwrap();
+        extract_primary_content_to(&primary_content_dir);
+    }
 
+    let parts_dir = unity_project_dir.join("ExportedProject").join("Assets").join("Resources").join("parts");
+    let models_dir = primary_content_dir.join("Assets").join("PrefabHierarchyObject");
+
+    let part_prefab_regex = Regex::new(r"^(\d+)\.prefab$").unwrap();
+    for part_file in read_dir(parts_dir.clone()).unwrap() {
+        let Ok(prefab_path) = part_file else {continue;};
+        if !prefab_path.path().is_file() || prefab_path.path().is_dir() {continue;}
+        if !part_prefab_regex.is_match(prefab_path.path().file_name().unwrap().to_str().unwrap()) {continue;}
+
+
+        
+        let model_path = models_dir.join(prefab_path.path().file_stem().unwrap().to_str().unwrap().to_owned()+".glb");
+        if !model_path.exists() {
+            println!("model path {:?} doesn't exist",model_path);
+            continue;
+        }
+
+        let prefab = parse_prefab(&prefab_path.path());
+
+        let part_mono_behaviour = &prefab.components.iter().filter(|pair| {
+            if pair.0 != "MonoBehaviour" { return false; }
+            let Some(m_script) = pair.1.get("m_Script") else { return false; };
+            let Some(map) = m_script.as_hash() else { return false; };
+            let Some(file_id) = map.get(&Yaml::from_str("fileID")) else { return false; };
+            let Some(guid) = map.get(&Yaml::from_str("guid")) else { return false; };
+            let Some(type_num) = map.get(&Yaml::from_str("type")) else { return false; };
+            //println!("checking fileid {:?} guid {:?} type {:?}",file_id,guid,type_num);
+            //println!("of {:?}",pair.1);
+
+            return (file_id.as_i64()==Some(11500000))&&(guid.as_str()==Some("025b32fee4a7141deb25f3720956b98b"))&&(type_num.as_i64()==Some(3));
+        }).next().unwrap().1;
+
+
+        parts.push( PartData {
+            id: part_mono_behaviour.get("id").unwrap().as_i64().unwrap() as i32,
+            armor: Some(part_mono_behaviour.get("armor").unwrap().as_i64().unwrap() as i32),
+            model: model_path,
+        });
+    }
+
+    return parts;
+}
+
+
+
+pub fn get_workshop_parts(workshop_folder: &Path, cache_folder: &Path) -> Vec<PartData> {
     println!("workshop folder is {:?}",workshop_folder);
-    println!("game folder is {:?}",game_folder);
-    // This will POST a body of `foo=bar&baz=quux`
-    // let params = [("path", "")];
-    // let client = reqwest::blocking::Client::new();
-    // let res = client.post("http://127.0.0.1:8001/LoadFile")
-    //     //.body("the exact body that is sent")
-    //     .form(&params)
-    //     .send().unwrap();
-    // println!("response is {:?}",res);
+    let mut parts: Vec<PartData> = Vec::new();
 
     for workshop_item in read_dir(workshop_folder.clone()).unwrap() {
         let Ok(path) = workshop_item else {
@@ -62,8 +107,28 @@ fn main() {
             continue;
         }
 
-        let unity_project_dir = out_folder.join(path.path().file_stem().unwrap()).join("unity_project_extracted");
-        let primary_content_dir = out_folder.join(path.path().file_stem().unwrap()).join("primary_content_extracted");
+
+
+
+        let unity_project_dir = cache_folder.join(path.path().file_stem().unwrap()).join("unity_project_extracted");
+        let primary_content_dir = cache_folder.join(path.path().file_stem().unwrap()).join("primary_content_extracted");
+
+
+        if (!Path::exists(&unity_project_dir)) || (!Path::exists(&primary_content_dir)) {
+            load_file(&namod_file);
+        }
+        if !Path::exists(&unity_project_dir) {
+            create_dir_all(unity_project_dir.clone()).unwrap();
+            extract_unity_project_to(&unity_project_dir);
+        }
+        if !Path::exists(&primary_content_dir) {
+            create_dir_all(primary_content_dir.clone()).unwrap();
+            extract_primary_content_to(&primary_content_dir);
+        }
+
+
+
+
 
         let mut manifest_file_name = namod_file.file_name().unwrap().to_str().unwrap().to_owned();
         manifest_file_name.push_str(".manifest");
@@ -79,63 +144,50 @@ fn main() {
             let mut asset_path = PathBuf::from(asset.as_str().unwrap());
             //skip Assets
             asset_path = PathBuf::from_iter(asset_path.components().skip(1));
-            println!("the new assetpath is {:?}",asset_path);
+            //println!("the new assetpath is {:?}",asset_path);
 
             if asset_path.extension() == Some(OsStr::new("prefab")) {
                 prefab_paths.push(asset_path);
             }
         }
 
+
+
+        let models_dir = primary_content_dir.join("Assets").join("PrefabHierarchyObject");
+
+
         for prefab_path in prefab_paths {
             let lowercased_path =  unity_project_dir.join("ExportedProject").join("Assets").join(PathBuf::from(prefab_path.to_str().unwrap().to_ascii_lowercase()));
-            println!("prefab is {:?}",lowercased_path.clone());
+            //println!("prefab is {:?}",lowercased_path.clone());
 
-            let components = parse_prefab(&lowercased_path);
+            let prefab = parse_prefab(&lowercased_path);
 
-            // let part_mono_behaviour = components.iter().filter(|pair| {
-            //     if pair.0 != "MonoBehaviour" { return false; }
-            //     let Some(m_script) = pair.1.get("m_Script") else { return false; };
-            //     let Some(map) = m_script.as_hash() else { return false; };
-            //     let Some(file_id) = map.get(&Yaml::from_str("fileID")) else { return false; };
-            //     let Some(guid) = map.get(&Yaml::from_str("guid")) else { return false; };
-            //     let Some(type_num) = map.get(&Yaml::from_str("type")) else { return false; };
-            //     println!("checking fileid {:?} guid {:?} type {:?}",file_id,guid,type_num);
-            //     //println!("of {:?}",pair.1);
-            //
-            //     return (file_id.as_i64()==Some(11500000))&&(guid.as_str()==Some("3ec293451970d5435a860c7692116d1d"))&&(type_num.as_i64()==Some(3));
-            // }).next().unwrap().1;
+            let part_mono_behaviour = &prefab.components.iter().filter(|pair| {
+                if pair.0 != "MonoBehaviour" { return false; }
+                let Some(m_script) = pair.1.get("m_Script") else { return false; };
+                let Some(map) = m_script.as_hash() else { return false; };
+                let Some(file_id) = map.get(&Yaml::from_str("fileID")) else { return false; };
+                let Some(guid) = map.get(&Yaml::from_str("guid")) else { return false; };
+                let Some(type_num) = map.get(&Yaml::from_str("type")) else { return false; };
+                //println!("checking fileid {:?} guid {:?} type {:?}",file_id,guid,type_num);
+                //println!("of {:?}",pair.1);
+
+                return (file_id.as_i64()==Some(11500000))&&(guid.as_str()==Some("3ec293451970d5435a860c7692116d1d"))&&(type_num.as_i64()==Some(3));
+            }).next().unwrap().1;
 
             //println!("the MonoBehaviour is {:?}",part_mono_behaviour);
             
+            let model_path = models_dir.join(prefab_path.file_stem().unwrap().to_str().unwrap().to_owned()+".glb");
+            if model_path.exists() {
+                parts.push( PartData {
+                    id: part_mono_behaviour.get("id").unwrap().as_i64().unwrap() as i32,
+                    armor: Some(part_mono_behaviour.get("armor").unwrap().as_i64().unwrap() as i32),
+                    model: model_path,
+                });
+            }
         }
-
-
-
-
-
-        create_dir_all(unity_project_dir.clone());
-        create_dir_all(primary_content_dir.clone());
-
-        load_file(&namod_file);
-
-        //extract_unity_project_to(&unity_project_dir);
-        //extract_primary_content_to(&primary_content_dir);
-
-
-        //let mod_config = load_mod_config_file(&config_file);
-
-
-
-        
-
-        
     }
-    
-    // let client = reqwest::Client::new();
-    // let res = client.post("http://httpbin.org/post")
-    //     .form(&params)
-    //     .send()
-    //     .await?;
+    return parts;
 }
 
 //fn get_path_from_case_insensitive(start_path: &Path, relative_path: &Path) -> PathBuf {
@@ -151,9 +203,6 @@ struct GameObject {
 }
 impl GameObject {
     fn get_transform(&self) -> &HashMap<String,Yaml> {
-        println!("my id is {:?}",self.id);
-        println!("my components are {:?}",self.components);
-        
         return &self.components.iter().filter(|thing2| {thing2.0=="Transform"}).next().unwrap().1;
     }
 
@@ -177,10 +226,8 @@ impl GameObject {
 
 
 
-fn parse_prefab(path: &Path) -> HashMap<String,HashMap<String,Yaml>>{
-    let mut main_map: HashMap<String,HashMap<String,Yaml>> = HashMap::new();
-
-    println!("parsing prefab {:?}",path);
+fn parse_prefab(path: &Path) -> GameObject{
+    //println!("parsing prefab {:?}",path);
     let file = fs::read_to_string(path).expect("Unable to read file");
     let re = Regex::new(r"--- !u!\d+ &(\d+)").unwrap();
     let mut captures: Vec<((usize,usize),usize)> = Vec::new();
@@ -220,12 +267,10 @@ fn parse_prefab(path: &Path) -> HashMap<String,HashMap<String,Yaml>>{
         if component_type.as_str().unwrap() == "GameObject" {
             gameobjects.try_insert(component.0, GameObject { id: component.0, components: Vec::new(), children: Vec::new() });
             gameobjects.get_mut(&component.0).unwrap().components.push((component_type.as_str().unwrap().to_string(),attribute_map));
-            println!("added gameobject id {:?}",component.0);
         }else {
             let gameobject_id = attribute_map.get("m_GameObject").unwrap().as_hash().unwrap().get(&Yaml::from_str("fileID")).unwrap().as_i64().unwrap() as usize;
             gameobjects.try_insert(gameobject_id, GameObject { id: gameobject_id, components: Vec::new(), children: Vec::new() });
             gameobjects.get_mut(&gameobject_id).unwrap().components.push((component_type.as_str().unwrap().to_string(),attribute_map));
-            println!("added component {:?} to gameobject id {:?}",component_type,gameobject_id);
         }
     }
 
@@ -237,22 +282,11 @@ fn parse_prefab(path: &Path) -> HashMap<String,HashMap<String,Yaml>>{
             return None;
         }
     }).next().unwrap().clone();
-    println!("rootkey is {:?}",root_key);
-    println!("length is {:?}",gameobjects.len());
-    //println!("gameobjects is {:?}",gameobjects);
     let mut root = gameobjects.remove(&root_key).unwrap();
     let mut gameobjects: Vec<GameObject> = gameobjects.into_values().collect();
     root.take_children_recursive(&mut gameobjects);
 
-    println!("THING IS {:?}",root);
-    
-
-
-
-
-
-
-    return main_map;
+    return root;
 }
 
 
@@ -409,34 +443,42 @@ fn load_mod_config_file(file_path: &Path) -> Result<ModConfig,Box<dyn Error>> {
 
 
 
-
+fn load_folder(path: &Path){
+    let params = [("path", path)];
+    generate_request("/LoadFolder")
+        .form(&params)
+        .send().unwrap();
+}
 
 fn load_file(path: &Path){
     let params = [("path", path)];
-    let client = reqwest::blocking::Client::new();
-    let res = client.post("http://127.0.0.1:8001/LoadFile")
-        //.body("the exact body that is sent")
+    generate_request("/LoadFile")
         .form(&params)
-        .timeout(Duration::from_secs(600))
         .send().unwrap();
 }
 
 fn extract_unity_project_to(path: &Path){
     let params = [("path", path)];
-    let client = reqwest::blocking::Client::new();
-    let res = client.post("http://127.0.0.1:8001/Export/UnityProject")
-        //.body("the exact body that is sent")
-        .timeout(Duration::from_secs(600))
+    generate_request("/Export/UnityProject")
         .form(&params)
         .send().unwrap();
 }
 
 fn extract_primary_content_to(path: &Path){
     let params = [("path", path)];
-    let client = reqwest::blocking::Client::new();
-    let res = client.post("http://127.0.0.1:8001/Export/PrimaryContent")
-        //.body("the exact body that is sent")
-        .timeout(Duration::from_secs(600))
+    generate_request("/Export/PrimaryContent")
         .form(&params)
         .send().unwrap();
+}
+
+fn generate_request(path: &str) -> reqwest::blocking::RequestBuilder{
+    let client = reqwest::blocking::Client::new();
+    let mut url = "http://127.0.0.1:8001".to_owned();
+    url.push_str(path);
+    return client.post(&url)
+        //.body("the exact body that is sent")
+        .timeout(Duration::from_secs(60*60))
+        // .form(params)
+        // .send();
+
 }

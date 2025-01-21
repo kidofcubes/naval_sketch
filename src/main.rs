@@ -3,13 +3,14 @@ mod cam_movement;
 mod editor;
 mod editor_ui;
 mod parts;
+mod asset_extractor;
 
-use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::mesh::{Extrudable, Indices}, window::CursorGrabMode};
+use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::mesh::{Extrudable, Indices}, utils::HashMap, window::CursorGrabMode};
 use bevy_mod_outline::OutlinePlugin;
 use cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text, CameraMovementPlugin};
 use editor::EditorPlugin;
 use parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
-use parts::{on_part_meshes_init, place_part};
+use parts::{on_part_meshes_init, place_part, register_all_parts, PartRegistry};
 use std::{cmp::{max, min}, env, f32::consts::FRAC_PI_2, path::Path};
 
 
@@ -31,7 +32,7 @@ fn update_material_on<E>(
 
 
 fn temp_test_update(
-    mut mesh_thing: ResMut<BuildData>,
+    //mut mesh_thing: ResMut<BuildData>,
     mut meshes: ResMut<Assets<Mesh>>,
     key: Res<ButtonInput<KeyCode>>,
     mut query: Query<(Entity, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
@@ -116,6 +117,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     init_data: Res<InitData>,
     asset_server: Res<AssetServer>,
+    part_registry: Res<PartRegistry>,
     //mut scene_assets: ResMut<Assets<Scene>>,
     mut ambient_light: ResMut<AmbientLight>,
 ) {
@@ -125,12 +127,14 @@ fn setup(
     let parts_result = load_save(Path::new(&path));
 
 
+    println!("PLACING PARTS");
     if let Ok(parts) = parts_result {
         for part in parts {
             place_part(
                 &mut meshes,
                 &mut materials,
                 &asset_server,
+                &part_registry,
                 &mut commands,
                 &part);
         }
@@ -169,7 +173,7 @@ fn main() {
 
     App::new()
         .insert_resource(InitData {file_path: file_path.to_string()})
-        .insert_resource(BuildData {mesh_thing: None})
+        .insert_resource(PartRegistry {parts: HashMap::new()})
         .add_plugins((
                 DefaultPlugins.build(),
                 CameraMovementPlugin,
@@ -177,7 +181,7 @@ fn main() {
                 EditorPlugin,
                 //OutlinePlugin,
                 ))
-        .add_systems(Startup, (setup))
+        .add_systems(Startup, (register_all_parts.before(setup),setup))
         .add_systems(Update, (temp_test_update, on_part_meshes_init))
 
 

@@ -132,6 +132,15 @@ struct QueuedCommand {
 // }
 
 
+#[derive(Component, Debug, Copy, Clone)]
+#[require(BasePart)]
+struct EditorPart {
+    center: Vec3,
+    //collier is half lengths
+    collider: Vec3
+}
+
+
 
 fn execute_queued_commands(
     mut editor_data: ResMut<EditorData>,
