@@ -25,6 +25,3 @@ opt-level = 1
 [[bin]]
 name = "asset_extractor"
 path = "src/asset_extractor.rs"
-
-[patch.crates-io]
-yaml-rust2 = {path = "/home/kidofcubes/.rhack/yaml-rust2-0.9.0"}
