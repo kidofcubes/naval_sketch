@@ -1,12 +1,12 @@
 mod parsing;
-use std::{env, error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, ReadDir}, path::{Path, PathBuf}, time::Duration};
+use std::{collections::BTreeMap, env, error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, ReadDir}, mem, path::{Path, PathBuf}, time::Duration};
 
 use bevy::utils::HashMap;
 use parsing::{get_attribute_string, ParseError};
-use quick_xml::{events::{BytesStart, Event}, Reader};
+use quick_xml::{events::{BytesStart}, Reader};
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
-use yaml_rust2::{parser::MarkedEventReceiver, Yaml, YamlLoader};
+use yaml_rust2::{parser::{EventReceiver, MarkedEventReceiver, Parser, Tag}, scanner::{Marker, TScalarStyle}, yaml::Hash, Event, ScanError, Yaml};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -46,8 +46,6 @@ fn main() {
 
 
 
-        // extract_unity_project_to(&unity_project_dir);
-        // extract_primary_content_to(&primary_content_dir);
 
         println!("file is {:?}",namod_file);
 
@@ -72,7 +70,7 @@ fn main() {
         println!("THE MANIFEST FILE IS {:?}",manifest_file);
 
 
-        let manifest_yaml_vec = YamlLoader::load_from_str(&fs::read_to_string(manifest_file).expect("Unable to read file")).unwrap();
+        let manifest_yaml_vec = yaml_rust2::YamlLoader::load_from_str(&fs::read_to_string(manifest_file).expect("Unable to read file")).unwrap();
 
         let mut prefab_paths: Vec<PathBuf> = Vec::new();
         for asset in manifest_yaml_vec[0]["Assets"].clone().into_iter() {
@@ -101,7 +99,7 @@ fn main() {
                 let Some(guid) = map.get(&Yaml::from_str("guid")) else { return false; };
                 let Some(type_num) = map.get(&Yaml::from_str("type")) else { return false; };
                 println!("checking fileid {:?} guid {:?} type {:?}",file_id,guid,type_num);
-                println!("of {:?}",pair.1);
+                //println!("of {:?}",pair.1);
 
                 return (file_id.as_i64()==Some(11500000))&&(guid.as_str()==Some("3ec293451970d5435a860c7692116d1d"))&&(type_num.as_i64()==Some(3));
             }).next().unwrap().1;
@@ -119,7 +117,11 @@ fn main() {
 
         load_file(&namod_file);
 
-        let mod_config = load_mod_config_file(&config_file);
+        //extract_unity_project_to(&unity_project_dir);
+        //extract_primary_content_to(&primary_content_dir);
+
+
+        //let mod_config = load_mod_config_file(&config_file);
 
 
 
@@ -139,22 +141,38 @@ fn main() {
 //
 //}
 
+
 struct GameObject {
-    components: HashMap<String,HashMap<String,Yaml>>,
+    components: Vec<HashMap<String,Yaml>>,
     children: Vec<Box<GameObject>>
 }
 
 
 
-fn parse_prefab(path: &Path) -> GameObject {
+fn parse_prefab(path: &Path) -> HashMap<String,HashMap<String,Yaml>>{
     let mut main_map: HashMap<String,HashMap<String,Yaml>> = HashMap::new();
 
-    let prefab_yaml_vec = YamlLoader::load_from_str(&fs::read_to_string(path).expect("Unable to read file")).unwrap();
+    let file = fs::read_to_string(path).expect("Unable to read file");
+    let mut parser = Parser::new(file.chars()).keep_tags(true);
+    //let mut loader = YamlLoader::default();
+
+    //println!("the file is {:?}",);
+    //let prefab_yaml_vec = yaml_rust2::YamlLoader::load_from_str(&fs::read_to_string(path).expect("Unable to read file")).unwrap();
+    //let prefab_yaml_vec = YamlLoaderTagged::load_from_parser(&mut parser).unwrap();
+    let mut loader = YamlLoaderTagged::default();
+    parser.load(&mut loader, true);
+
+    if let Some(e) = loader.error {
+        panic!("{:?}",e)
+    }
+    println!("the things are {:?} {:?}",&loader.docs,loader.doc_stack);
+    let prefab_yaml_vec = loader.docs;
 
 
     for component in prefab_yaml_vec.clone().into_iter() {
         let mut base_hashmap = component.into_hash().unwrap();
         let component_type = base_hashmap.keys().next().unwrap().clone();
+
 
     }
 
@@ -267,17 +285,17 @@ fn load_mod_config_file(file_path: &Path) -> Result<ModConfig,Box<dyn Error>> {
         match reader.read_event() {
             Err(e) => panic!("Error at position {}: {:?}", reader.error_position(), e),
             // exits the loop when reaching end of file
-            Ok(Event::Eof) => {
+            Ok(quick_xml::events::Event::Eof) => {
                 break;
             },
 
-            Ok(Event::Start(e)) => {
+            Ok(quick_xml::events::Event::Start(e)) => {
                 match e.name().as_ref() {
                     _ => {
                     }
                 }
             }
-            Ok(Event::Empty(e)) => {
+            Ok(quick_xml::events::Event::Empty(e)) => {
                 match e.name().as_ref() {
                     b"config" => {
                         mod_config.mod_name = get_attribute_string(&e,"ModName")?;
@@ -308,7 +326,7 @@ fn load_mod_config_file(file_path: &Path) -> Result<ModConfig,Box<dyn Error>> {
 
 
             }
-            Ok(Event::End(e)) => {
+            Ok(quick_xml::events::Event::End(e)) => {
                 match e.name().as_ref() {
                     _ => {}
                 }
@@ -323,6 +341,235 @@ fn load_mod_config_file(file_path: &Path) -> Result<ModConfig,Box<dyn Error>> {
     return Ok(mod_config);
 
 }
+
+// parse f64 as Core schema
+// See: https://github.com/chyh1990/yaml-rust/issues/51
+fn parse_f64(v: &str) -> Option<f64> {
+    match v {
+        ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => Some(f64::INFINITY),
+        "-.inf" | "-.Inf" | "-.INF" => Some(f64::NEG_INFINITY),
+        ".nan" | "NaN" | ".NAN" => Some(f64::NAN),
+        _ => v.parse::<f64>().ok(),
+    }
+}
+
+/// Main structure for quickly parsing YAML.
+///
+/// See [`YamlLoader::load_from_str`].
+#[derive(Default)]
+pub struct YamlLoaderTagged {
+    /// The different YAML documents that are loaded.
+    docs: Vec<Yaml>,
+    // states
+    // (current node, anchor_id) tuple
+    doc_stack: Vec<(Yaml, usize)>,
+    key_stack: Vec<Yaml>,
+    anchor_map: BTreeMap<usize, Yaml>,
+    /// An error, if one was encountered.
+    error: Option<ScanError>,
+}
+
+impl MarkedEventReceiver for YamlLoaderTagged {
+    fn on_event(&mut self, ev: yaml_rust2::parser::Event, mark: Marker) {
+        if self.error.is_some() {
+            return;
+        }
+        if let Err(e) = self.on_event_impl(ev, mark) {
+            self.error = Some(e);
+        }
+    }
+}
+
+impl YamlLoaderTagged {
+    fn on_event_impl(&mut self, ev: Event, mark: Marker) -> Result<(), ScanError> {
+        // println!("EV {:?}", ev);
+        match ev {
+            Event::DocumentStart | Event::Nothing | Event::StreamStart | Event::StreamEnd => {
+                // do nothing
+            }
+            Event::DocumentEnd => {
+                //println!("the docstack last is {:?}",self.doc_stack.last());
+                match self.doc_stack.len() {
+                    // empty document
+                    0 => self.docs.push(Yaml::BadValue),
+                    1 => self.docs.push(self.doc_stack.pop().unwrap().0),
+                    _ => unreachable!(),
+                }
+            }
+            Event::SequenceStart(aid, tag) => {
+                //println!("sequence starts with a {:?} and {:?}",aid,tag);
+                self.doc_stack.push((Yaml::Array(Vec::new()), aid));
+            }
+            Event::SequenceEnd => {
+                let node = self.doc_stack.pop().unwrap();
+                self.insert_new_node(node, mark)?;
+            }
+            Event::MappingStart(aid, tag) => {
+                //println!("mapping start with {:?} and {:?}",aid,tag);
+                self.doc_stack.push((Yaml::Hash(Hash::new()), aid));
+                self.key_stack.push(Yaml::BadValue);
+            }
+            Event::MappingEnd => {
+                self.key_stack.pop().unwrap();
+                let node = self.doc_stack.pop().unwrap();
+                self.insert_new_node(node, mark)?;
+            }
+            Event::Scalar(v, style, aid, tag) => {
+                let node = if style != TScalarStyle::Plain {
+                    Yaml::String(v)
+                } else if let Some(Tag {
+                    ref handle,
+                    ref suffix,
+                }) = tag
+                {
+                    //println!("TAG THING {:?} {:?}",handle,suffix);
+                    if handle == "tag:yaml.org,2002:" {
+                        match suffix.as_ref() {
+                            "bool" => {
+                                // "true" or "false"
+                                match v.parse::<bool>() {
+                                    Err(_) => Yaml::BadValue,
+                                    Ok(v) => Yaml::Boolean(v),
+                                }
+                            }
+                            "int" => match v.parse::<i64>() {
+                                Err(_) => Yaml::BadValue,
+                                Ok(v) => Yaml::Integer(v),
+                            },
+                            "float" => match parse_f64(&v) {
+                                Some(_) => Yaml::Real(v),
+                                None => Yaml::BadValue,
+                            },
+                            "null" => match v.as_ref() {
+                                "~" | "null" => Yaml::Null,
+                                _ => Yaml::BadValue,
+                            },
+                            _ => Yaml::String(v),
+                        }
+                    } else {
+                        Yaml::String(v)
+                    }
+                } else {
+                    // Datatype is not specified, or unrecognized
+                    Yaml::from_str(&v)
+                };
+
+                self.insert_new_node((node, aid), mark)?;
+            }
+            Event::Alias(id) => {
+                println!("got alias with {:?}",id);
+                println!("got alias with {:?}",id);
+                println!("got alias with {:?}",id);
+                println!("got alias with {:?}",id);
+                println!("got alias with {:?}",id);
+                let n = match self.anchor_map.get(&id) {
+                    Some(v) => v.clone(),
+                    None => Yaml::BadValue,
+                };
+                self.insert_new_node((n, 0), mark)?;
+            }
+        }
+        // println!("DOC {:?}", self.doc_stack);
+        Ok(())
+    }
+
+    fn insert_new_node(&mut self, node: (Yaml, usize), mark: Marker) -> Result<(), ScanError> {
+        // valid anchor id starts from 1
+        if node.1 > 0 {
+            println!("added thing to anchormap {:?}",node.1);
+            self.anchor_map.insert(node.1, node.0.clone());
+        }
+        if self.doc_stack.is_empty() {
+            self.doc_stack.push(node);
+        } else {
+            let parent = self.doc_stack.last_mut().unwrap();
+            match *parent {
+                (Yaml::Array(ref mut v), _) => v.push(node.0),
+                (Yaml::Hash(ref mut h), _) => {
+                    let cur_key = self.key_stack.last_mut().unwrap();
+                    // current node is a key
+                    if cur_key.is_badvalue() {
+                        *cur_key = node.0;
+                    // current node is a value
+                    } else {
+                        let mut newkey = Yaml::BadValue;
+                        mem::swap(&mut newkey, cur_key);
+                        if h.insert(newkey, node.0).is_some() {
+                            let inserted_key = h.back().unwrap().0;
+                            return Err(ScanError::new_string(
+                                mark,
+                                format!("{inserted_key:?}: duplicated key in mapping"),
+                            ));
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(())
+    }
+
+    /// Load the given string as a set of YAML documents.
+    ///
+    /// The `source` is interpreted as YAML documents and is parsed. Parsing succeeds if and only
+    /// if all documents are parsed successfully. An error in a latter document prevents the former
+    /// from being returned.
+    /// # Errors
+    /// Returns `ScanError` when loading fails.
+    pub fn load_from_str(source: &str) -> Result<Vec<Yaml>, ScanError> {
+        Self::load_from_iter(source.chars())
+    }
+
+    /// Load the contents of the given iterator as a set of YAML documents.
+    ///
+    /// The `source` is interpreted as YAML documents and is parsed. Parsing succeeds if and only
+    /// if all documents are parsed successfully. An error in a latter document prevents the former
+    /// from being returned.
+    /// # Errors
+    /// Returns `ScanError` when loading fails.
+    pub fn load_from_iter<I: Iterator<Item = char>>(source: I) -> Result<Vec<Yaml>, ScanError> {
+        let mut parser = Parser::new(source);
+        Self::load_from_parser(&mut parser)
+    }
+
+    /// Load the contents from the specified Parser as a set of YAML documents.
+    ///
+    /// Parsing succeeds if and only if all documents are parsed successfully.
+    /// An error in a latter document prevents the former from being returned.
+    /// # Errors
+    /// Returns `ScanError` when loading fails.
+    pub fn load_from_parser<I: Iterator<Item = char>>(
+        parser: &mut Parser<I>,
+    ) -> Result<Vec<Yaml>, ScanError> {
+        let mut loader = YamlLoaderTagged::default();
+        parser.load(&mut loader, true)?;
+        if let Some(e) = loader.error {
+            Err(e)
+        } else {
+            Ok(loader.docs)
+        }
+    }
+
+    /// Return a reference to the parsed Yaml documents.
+    #[must_use]
+    pub fn documents(&self) -> &[Yaml] {
+        &self.docs
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
