@@ -1,12 +1,12 @@
 use core::f32;
 use std::{collections::VecDeque, iter::once, ops::DerefMut};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{Dir3, EulerRot, Isometry3d, Quat, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec3, Vec3A}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextFont}, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
 use bevy_mod_outline::OutlineVolume;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData}, parsing::BasePart, parts::{base_part_to_bevy_transform, unity_to_bevy_translation, BasePartMesh}};
+use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, Hovered}, parsing::{AdjustableHull, BasePart}, parts::{get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
 
 pub struct EditorPlugin;
 
@@ -186,8 +186,10 @@ pub fn translate_floatings(
     windows: Single<&Window>,
     mut ray_cast: MeshRayCast,
     mut gizmos: Gizmos,
-    mut selected_query: Query<&mut Transform, With<Selected>>,
+    mut selected_query: Query<(&mut Transform,&BasePart,Option<&AdjustableHull>), With<Selected>>,
+    part_query: Query<(&BasePart,Option<&AdjustableHull>)>,
     base_part_mesh_query: Query<&BasePartMesh>,
+    part_registry: Res<PartRegistry>,
 ) {
     let (camera, camera_transform) = *camera_query;
 
@@ -200,7 +202,7 @@ pub fn translate_floatings(
         return;
     };
 
-    let Some((_, hit)) = ray_cast.cast_ray(ray, &RayCastSettings {
+    let Some((hit_entity, hit)) = ray_cast.cast_ray(ray, &RayCastSettings {
         filter: &|entity| -> bool {
             if editor_data.floating {
                 if let Ok(base_part_mesh) = base_part_mesh_query.get(entity) {
@@ -218,19 +220,38 @@ pub fn translate_floatings(
 
 
     if editor_data.floating {
-        let mut average_pos = Vec3::ZERO;
+        if selected_query.is_empty() { return; }
+        // let mut average_pos = Vec3::ZERO;
+        //
+        // for transform in &selected_query {
+        //     average_pos+=transform.0.translation;
+        // }
+        // average_pos/=selected_query.iter().len() as f32;
 
-        for transform in &selected_query {
-            average_pos+=transform.translation;
-        }
-        average_pos/=selected_query.iter().len() as f32;
+        let dir = Dir3::new_unchecked((hit.point-camera_transform.translation()).normalize());
+        let mut dist=f32::INFINITY;
 
-        let translation = hit.point-average_pos;
+        let main_selected = selected_query.get_single().unwrap();
+        let mut a = get_collider(main_selected.1, main_selected.2, part_registry.parts.get(&main_selected.1.id).unwrap());
+        a.translation=camera_transform.translation();
+
+        let hit_base_entity_result = part_query.get(base_part_mesh_query.get(*hit_entity).unwrap().base_part).unwrap();
+
+        //println!("collider main is {:?}",a);
+
+        let b = get_collider(hit_base_entity_result.0, hit_base_entity_result.1, part_registry.parts.get(&hit_base_entity_result.0.id).unwrap());
+            //println!("collider secondary is {:?}",b);
+        dist=dist.min(to_touch(&a, &b, dir));
+        if dist==f32::INFINITY { return; }
+        let translation = dir.as_vec3()*dist;
+        
+
         println!("TRANSOFMRMED EVERYTHING BY {:?}",translation);
         for mut transform in &mut selected_query {
-            transform.translation.x+=translation.x;
-            transform.translation.y+=translation.y;
-            transform.translation.z+=translation.z;
+            transform.0.translation=camera_transform.translation()+translation;
+            // transform.0.translation.x+=translation.x;
+            // transform.0.translation.y+=translation.y;
+            // transform.0.translation.z+=translation.z;
         }
     }
 
@@ -268,6 +289,233 @@ pub fn translate_floatings(
     //     hit.point+hit.normal.normalize(),
     //     Color::WHITE,
     // );
+}
+
+// fn line_line_intersect(
+//    p1: Vec3,p2: Vec3,p3: Vec3,p4: Vec3
+// ) -> Option<(f32, f32, Vec3, Vec3)>{
+//     let (p13,p43,p21) = (Vec3::ZERO,Vec3::ZERO,Vec3::ZERO);
+//     let (d1343,d4321,d1321,d4343,d2121) = (0.0,0.0,0.0,0.0,0.0);
+//     let (numer,denom) = (0.0,0.0);
+//  
+//     p13.x = p1.x - p3.x;
+//     p13.y = p1.y - p3.y;
+//     p13.z = p1.z - p3.z;
+//     p43.x = p4.x - p3.x;
+//     p43.y = p4.y - p3.y;
+//     p43.z = p4.z - p3.z;
+//     if ((p43.x).abs() < f32::EPSILON&& (p43.y).abs() < f32::EPSILON && (p43.z).abs < f32::EPSILON) {
+//        return(None);
+//     }
+//     p21.x = p2.x - p1.x;
+//     p21.y = p2.y - p1.y;
+//     p21.z = p2.z - p1.z;
+//     if ((p21.x).abs() < f32::EPSILON && (p21.y).abs() < f32::EPSILON && (p21.z).abs() < f32::EPSILON) {
+//        return(None);
+//     }
+//  
+//     d1343 = p13.x * p43.x + p13.y * p43.y + p13.z * p43.z;
+//     d4321 = p43.x * p21.x + p43.y * p21.y + p43.z * p21.z;
+//     d1321 = p13.x * p21.x + p13.y * p21.y + p13.z * p21.z;
+//     d4343 = p43.x * p43.x + p43.y * p43.y + p43.z * p43.z;
+//     d2121 = p21.x * p21.x + p21.y * p21.y + p21.z * p21.z;
+//  
+//     denom = d2121 * d4343 - d4321 * d4321;
+//     if ((denom).abs() < f32::EPSILON){
+//        return(None);
+//     }
+//     numer = d1343 * d4321 - d1321 * d4343;
+//  
+//
+//
+//     let mut pa: Vec3 = Vec3::ZERO;
+//     let mut pb: Vec3 = Vec3::ZERO;
+//     let mua = numer / denom;
+//     let mub = (d1343 + d4321 * (mua)) / d4343;
+//  
+//     pa.x = p1.x + mua * p21.x;
+//     pa.y = p1.y + mua * p21.y;
+//     pa.z = p1.z + mua * p21.z;
+//     pb.x = p3.x + mub * p43.x;
+//     pb.y = p3.y + mub * p43.y;
+//     pb.z = p3.z + mub * p43.z;
+//  
+//     return(Some((mua,mub,pa,pb)));
+// }
+
+
+
+
+
+
+
+
+
+enum Thing {
+    Vertex(Vec3),
+    Line(Vec3,Vec3),
+    Plane(Vec3,Vec3,Vec3,Vec3)
+}
+
+///how far a has to move in direction dir to touch b
+fn to_touch_thing(a: Thing, b: Thing, dir: Dir3) -> Option<f32>{
+    match a {
+        Thing::Vertex(a_pos) => {
+            match b {
+                Thing::Vertex(vec3) => None,
+                Thing::Line(vec3, vec4) => None,
+                Thing::Plane(plane_center, normal, normal2, normal3) => {
+                    let ray = Ray3d{ origin: a_pos, direction: dir};
+                    let hit = ray.intersect_plane(plane_center, InfinitePlane3d { normal: Dir3::new_unchecked(normal.normalize())});
+
+                    if hit == None {return None;}
+                    let hit = hit.unwrap();
+                    if 
+                        ((hit-plane_center).dot(normal2.normalize())).abs() < normal2.length() &&
+                        ((hit-plane_center).dot(normal3.normalize())).abs() < normal3.length()
+                    {
+                        return Some(hit);
+                    }else{
+                        return None;
+                    }
+                },
+            }
+        },
+        Thing::Line(a_start, a_end) => {
+            match b {
+                Thing::Vertex(vec3) => None,
+                Thing::Line(b_start, b_end) => {
+                    let ray = Ray3d{ origin: b_start, direction: Dir3::new_unchecked((b_end-b_start).normalize())};
+                    let hit = ray.intersect_plane(a_start, InfinitePlane3d { normal: Dir3::new_unchecked(dir.cross(a_end-a_start).normalize())});
+
+                    if hit == None {return None;}
+                    let hit = hit.unwrap();
+                    if 
+                        ((hit-a_start).dot((a_end-a_start).normalize())) <= (a_end-a_start).length()
+                            &&
+                        ((hit-a_start).dot((a_end-a_start).normalize())) >= 0.0
+                            &&
+                        ((hit-a_start).dot((dir).normalize())) >= 0.0
+                    {
+                        return Some(((hit-a_start).dot((dir).normalize())));
+                    }else{
+                        return None;
+                    }
+                    // let thing = line_line_intersect(a_start, a_end, b_start, b_end);
+                    // if thing == None {return None;}
+                    // let thing = thing.unwrap();
+                    // if (thing.2-thing.3).length() <= f32::EPSILON {
+                    //     return 
+                    // }
+                },
+                Thing::Plane(vec3, vec4, vec5, vec6) => None,
+            }
+        },
+        Thing::Plane(vec3, vec4, vec5, vec6) => {
+            None
+        },
+    }
+
+}
+
+fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3) -> f32{
+    
+    
+    //let new_a = Transform::from_matrix(a.compute_matrix()*a.compute_matrix().inverse());
+    // let new_a = Transform::IDENTITY;
+    // let new_b = Transform::from_matrix(b.compute_matrix()*(a.compute_matrix().inverse()));
+    let mut new_a = a;
+    let mut new_b = b;
+    println!("the a is {:?} new its {:?}",a,new_a);
+    println!("the b is {:?} new its {:?}",b,new_b);
+    println!("");
+    println!("");
+    println!("");
+    println!("");
+
+    // new_b.vertex[0https://gizmodo.com/picture-of-a-duck-accidentally-sent-to-stripe-workers-being-laid-off-2000552964]
+    //
+    //
+    let mut min_dist=f32::INFINITY;
+    for k in 0..2 {
+        let temp = new_b;
+        new_b = new_a;
+        new_a = temp;
+        dir = Dir3::new_unchecked(dir * -1.0);
+        for i in 0..8 {
+            //let vertex = cuboid_vertex(a, i);
+            let ray = Ray3d{ origin: cuboid_vertex(&new_b, i), direction: Dir3::new_unchecked(dir*-1.0)};
+            for j in 0..6 {
+                let plane = cuboid_face(&new_a, j);
+                let dist_hit = ray.intersect_plane(plane.1, InfinitePlane3d { normal: Dir3::new_unchecked(plane.0.0.normalize()) });
+                let Some(dist) = dist_hit else {continue;};
+                let hit_pos = ray.origin+(ray.direction.as_vec3()*dist);
+                //println!("hitpos at {:?}",hit_pos);
+                // if hit_pos.x.abs()<=1.0 && hit_pos.y.abs()<=1.0 && hit_pos.z.abs()<=1.0 {
+                //     min_dist = min_dist.min(dist);
+                // }
+                if 
+                    ((hit_pos-plane.1).dot(plane.0.1.normalize())).abs() > plane.0.1.length() &&
+                    ((hit_pos-plane.1).dot(plane.0.2.normalize())).abs() > plane.0.2.length()
+                {
+                     min_dist = min_dist.min(dist);
+
+                }
+            }
+        }
+    }
+
+
+
+    
+    
+    // let bounding_a = Aabb3d {
+    //     min: Vec3A::from(axis_a.translation-(axis_a.scale/2.0)),
+    //     max: Vec3A::from(axis_a.translation+(axis_a.scale/2.0)),
+    // };
+
+    // let new_b = b.with_rotation(b.rotation*a.rotation.inverse());
+    //
+    // let ray: Ray3d = Ray3d { origin: a.translation-(axis_a.scale/2.0), direction: dir };
+    
+
+    //ray.intersect_plane(b.translation+(b.forward()*(b.scale.z/2.0)), InfinitePlane3d {normal: b.forward()});
+
+    return min_dist;
+}
+
+fn cuboid_vertex(a: &Transform, i: u8) -> Vec3{
+    return a.translation+(a.forward()*neg(i&4))+(a.left()*neg(i&2))+(a.left()*neg(i&1));
+}
+fn cuboid_face(a: &Transform, i: u8) -> ((Vec3,Vec3,Vec3), Vec3){
+    let dir = match(i){
+        0 => {(*a.forward()*a.scale.z,*a.left()*a.scale.x,*a.up()*a.scale.y)}
+        1 => {(*a.back()*a.scale.z,*a.left()*a.scale.x,*a.up()*a.scale.y)}
+        2 => {(*a.right()*a.scale.x,*a.forward()*a.scale.z,*a.up()*a.scale.y)}
+        3 => {(*a.left()*a.scale.x,*a.forward()*a.scale.z,*a.up()*a.scale.y)}
+        4 => {(*a.up()*a.scale.y,*a.forward()*a.scale.z,*a.left()*a.scale.x)}
+        5 => {(*a.down()*a.scale.y,*a.forward()*a.scale.z,*a.left()*a.scale.x)}
+        _ => {panic!("wtf")}
+    };
+    //println!("cuboid face of {:?} is {:?}",a,a.translation+(dir*a.scale));
+    return (dir, a.translation+(dir.0*a.scale));
+}
+fn neg(num: u8) -> f32{
+    if num==0 {-0.5}else{0.5}
+}
+
+
+fn pos_in_cuboid(a: &Vec3A, b: &Transform) -> bool {
+    let new_a = b.rotation.inverse().mul_vec3a(*a);
+    
+    return 
+        (b.translation.x-b.scale.x <= new_a.x)&&(new_a.x <= b.translation.x+b.scale.x) &&
+        (b.translation.y-b.scale.y <= new_a.y)&&(new_a.y <= b.translation.y+b.scale.y) &&
+        (b.translation.z-b.scale.z <= new_a.z)&&(new_a.z <= b.translation.z+b.scale.z)
+        ;
+    
+
+
 }
 
 

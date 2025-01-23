@@ -143,7 +143,8 @@ pub fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Resu
 }
 
 pub fn load_save(file_path: &Path) -> Result<Vec<Part>, Box<dyn Error>> {
-    let xml = fs::read_to_string(&file_path).expect("Should have been able to read the file");
+    //let xml = fs::read_to_string(&file_path).expect("Should have been able to read the file");
+    let xml = fs::read_to_string(&file_path)?;
 
     //println!("thing is {xml}");
 

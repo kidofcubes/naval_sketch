@@ -43,6 +43,25 @@ pub fn register_all_parts(
 
 }
 
+pub fn get_collider(
+    base_part: &BasePart,
+    adjustable_hull: Option<&AdjustableHull>,
+    part_data: &PartData
+) -> Transform{
+    let mut transform = base_part_to_bevy_transform(base_part);
+    transform.translation += unity_to_bevy_translation(&part_data.center);
+    transform.scale = part_data.collider * base_part.scale;
+    //let mut transform = Transform::from_translation(unity_to_bevy_translation(&(hovered.0.position+part_data.center))).with_scale(part_data.collider);
+    if let Some(adjustable_hull) = adjustable_hull {
+        transform.scale = transform.scale * Vec3 {
+            x: f32::max(adjustable_hull.back_width+adjustable_hull.back_spread,adjustable_hull.front_width+adjustable_hull.front_spread),
+            y: adjustable_hull.height,
+            z: adjustable_hull.length
+        }/6.0;
+    }
+    return transform;
+}
+
 
 
 pub fn generate_adjustable_hull_mesh(mesh: &mut Mesh, adjustable_hull: &AdjustableHull) {

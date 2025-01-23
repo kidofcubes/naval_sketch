@@ -5,7 +5,7 @@ use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::
 use bevy_mod_outline::OutlineVolume;
 use regex::Regex;
 
-use crate::{editor::{CommandData, Selected}, parsing::{AdjustableHull, BasePart}, parts::{base_part_to_bevy_transform, unity_to_bevy_translation, PartRegistry}};
+use crate::{editor::{CommandData, Selected}, parsing::{AdjustableHull, BasePart}, parts::{base_part_to_bevy_transform, get_collider, unity_to_bevy_translation, PartRegistry}};
 
 
 #[derive(Resource)]
@@ -100,30 +100,11 @@ pub fn render_gizmos(
     mut gizmos: Gizmos
 ){
     for hovered in &hovered {
-        let part_data = part_registry.parts.get(&hovered.0.id).unwrap();
-        let mut transform = base_part_to_bevy_transform(hovered.0);
-        transform.translation += unity_to_bevy_translation(&part_data.center);
-        transform.scale = part_data.collider * hovered.0.scale;
-        //let mut transform = Transform::from_translation(unity_to_bevy_translation(&(hovered.0.position+part_data.center))).with_scale(part_data.collider);
-        if let Some(adjustable_hull) = hovered.1 {
-            transform.scale = transform.scale * Vec3 {
-                x: f32::max(adjustable_hull.back_width+adjustable_hull.back_spread,adjustable_hull.front_width+adjustable_hull.front_spread),
-                y: adjustable_hull.height,
-                z: adjustable_hull.length
-            }/6.0;
-
-        }else{
-
-        }
-        
-        gizmos.cuboid(
-            transform,
-            Color::srgb_u8(0, 255, 0)
-        );
+        // gizmos.cuboid(
+        //     get_collider(hovered.0, hovered.1, part_registry.parts.get(&hovered.0.id).unwrap()),
+        //     Color::srgb_u8(0, 255, 0)
+        // );
     }
-    
-
-
 }
 
 

@@ -140,6 +140,40 @@ fn setup(
         }
     }else{
         println!("ERROR WAS {:?}",parts_result);
+        place_part(
+                &mut meshes,
+                &mut materials,
+                &asset_server,
+                &part_registry,
+                &mut commands,
+                &Part::Normal(BasePart {
+                    id: 5,
+                    ignore_physics: false,
+                    position: Vec3 {x:10.0,y:10.0,z:10.0},
+                    rotation: Vec3::ZERO,
+                    scale: Vec3 {x:5.0,y:1.0,z:5.0},
+                    color: Color::WHITE,
+                    armor: 0,
+                }));
+
+
+        place_part(
+                &mut meshes,
+                &mut materials,
+                &asset_server,
+                &part_registry,
+                &mut commands,
+                &Part::Normal(BasePart {
+                    id: 5,
+                    ignore_physics: false,
+                    position: Vec3 {x:20.0,y:10.0,z:10.0},
+                    rotation: Vec3::ZERO,
+                    scale: Vec3 {x:1.0,y:1.0,z:1.0},
+                    color: Color::srgb_u8(0, 255, 0),
+                    armor: 0,
+                }));
+
+        
 
     }
 
@@ -169,6 +203,26 @@ fn main() {
     let file_path = &args[1];
 
     println!("wtfric {file_path}");
+
+    if file_path == "test" {
+        App::new()
+            .insert_resource(InitData {file_path: file_path.to_string()})
+            .insert_resource(PartRegistry {parts: HashMap::new()})
+            .add_plugins((
+                    DefaultPlugins.build(),
+                    CameraMovementPlugin,
+                    MeshPickingPlugin,
+                    EditorPlugin,
+                    //OutlinePlugin,
+                    ))
+            .add_systems(Startup, (register_all_parts.before(setup),setup))
+            .add_systems(Update, (temp_test_update, on_part_meshes_init))
+
+
+            .run();
+
+        return;
+    }
 
 
     App::new()
