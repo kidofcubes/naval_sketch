@@ -8,7 +8,7 @@ mod asset_extractor;
 use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::mesh::{Extrudable, Indices}, utils::HashMap, window::CursorGrabMode};
 use bevy_mod_outline::OutlinePlugin;
 use cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text, CameraMovementPlugin};
-use editor::EditorPlugin;
+use editor::{all_things, to_touch_thing, EditorPlugin, Thing};
 use parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
 use parts::{on_part_meshes_init, place_part, register_all_parts, PartRegistry};
 use std::{cmp::{max, min}, env, f32::consts::FRAC_PI_2, path::Path};
@@ -41,7 +41,8 @@ fn temp_test_update(
     mut scenes: ResMut<Assets<Scene>>,
     parent_query: Query<&Parent>,
     mut base_part_query: Query<(Entity, &BasePart)>,
-    mut commands: Commands
+    mut commands: Commands,
+    mut gizmo: Gizmos
 ) {
     if key.just_pressed(KeyCode::KeyH) {
         let hovered_mat = StandardMaterial::from_color(Color::WHITE);
@@ -61,6 +62,47 @@ fn temp_test_update(
             // ;
         }
     }
+    gizmo.cuboid(Transform::from_translation(Vec3::new(0.0,30.0,0.0)), Color::srgb_u8(0, 255, 0));
+    gizmo.cuboid(Transform::from_translation(Vec3::new(0.0,30.0,1.0)), Color::srgb_u8(0, 255, 0));
+
+    let up_plane = Thing::Plane(Vec3::ZERO, *Dir3::Y, *Dir3::Z, *Dir3::X);
+    let vertex = Thing::Vertex(Vec3 { x: 0.0, y: 3.5, z: 0.0 });
+    let line1 = Thing::Line(
+        Vec3 { x: 0.0, y: 5.0, z: 0.0 },
+        Vec3 { x: 0.01, y: 10.0, z: 3.0 }
+    );
+    let line2 = Thing::Line(
+        Vec3 { x: -0.01, y: -4.0, z: -0.1 },
+        Vec3 { x: 0.0, y: -8.0, z: 0.0 }
+    );
+
+
+
+    let line3 = Thing::Line(
+        Vec3::new(1.0,10.0,-1.0),
+        Vec3::new(-1.0,5.0,1.0)
+    );
+
+    let line4 = Thing::Line(
+        Vec3::new(-1.0,-10.0,-1.0),
+        Vec3::new(1.0,-5.0,1.0)
+    );
+
+    if let Thing::Line(start,end) = line3 {gizmo.line(start, end, Color::srgb_u8(255, 0, 0));}
+    if let Thing::Line(start,end) = line4 {gizmo.line(start, end, Color::srgb_u8(0, 0, 255));}
+    gizmo.cuboid(Transform::from_scale(Vec3::new(2.0,20.0,2.0)), Color::WHITE);
+    
+
+
+    //println!("totouchthing {:?}",to_touch_thing(&vertex, &up_plane, &Dir3::NEG_Y,&mut gizmo));
+    //println!("totouchthing {:?}",to_touch_thing(&line1, &line2, &Dir3::NEG_Y,&mut gizmo));
+    println!("totouchthing {:?}",to_touch_thing(&line3, &line4, &Dir3::NEG_Y,&mut gizmo));
+
+    // let cube_1 = Transform::from_translation(Vec3::new(10.0, 10.0, 10.0)).with_scale(Vec3::new(5.0,1.0,5.0));
+    // for cube_thing in all_things(&cube_1) {
+    //     println!("a thing for cube_1 is {:?}",cube_thing);
+    // }
+    
 
     // if scenes.is_changed() {
     //     for scene in scenes.iter() {
@@ -172,6 +214,19 @@ fn setup(
                     color: Color::srgb_u8(0, 255, 0),
                     armor: 0,
                 }));
+        
+
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::default())),
+            MeshMaterial3d(materials.add(Color::srgb_u8(0, 0, 255))),
+            Transform::from_translation(Vec3::new(0.0,30.0,0.0))
+        ));
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::default())),
+            MeshMaterial3d(materials.add(Color::srgb_u8(255, 0, 0))),
+            Transform::from_translation(Vec3::new(0.0,30.0,1.0))
+        ));
+
 
         
 
@@ -196,6 +251,7 @@ fn setup(
 
 
 }
+//NOTE, SCALE IS THE FULL WIDTH
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -205,21 +261,35 @@ fn main() {
     println!("wtfric {file_path}");
 
     if file_path == "test" {
+        
+
+
         App::new()
-            .insert_resource(InitData {file_path: file_path.to_string()})
-            .insert_resource(PartRegistry {parts: HashMap::new()})
             .add_plugins((
                     DefaultPlugins.build(),
                     CameraMovementPlugin,
-                    MeshPickingPlugin,
-                    EditorPlugin,
-                    //OutlinePlugin,
                     ))
-            .add_systems(Startup, (register_all_parts.before(setup),setup))
-            .add_systems(Update, (temp_test_update, on_part_meshes_init))
+            .add_systems(Update, (temp_test_update))
 
 
             .run();
+
+
+        // App::new()
+        //     .insert_resource(InitData {file_path: file_path.to_string()})
+        //     .insert_resource(PartRegistry {parts: HashMap::new()})
+        //     .add_plugins((
+        //             DefaultPlugins.build(),
+        //             CameraMovementPlugin,
+        //             MeshPickingPlugin,
+        //             EditorPlugin,
+        //             //OutlinePlugin,
+        //             ))
+        //     .add_systems(Startup, (register_all_parts.before(setup),setup))
+        //     .add_systems(Update, (temp_test_update, on_part_meshes_init))
+        //
+        //
+        //     .run();
 
         return;
     }

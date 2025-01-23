@@ -233,22 +233,28 @@ pub fn translate_floatings(
 
         let main_selected = selected_query.get_single().unwrap();
         let mut a = get_collider(main_selected.1, main_selected.2, part_registry.parts.get(&main_selected.1.id).unwrap());
+        gizmos.cuboid(a, Color::srgb_u8(0,0,255));
         a.translation=camera_transform.translation();
+        gizmos.cuboid(a, Color::srgb_u8(0,0,255));
 
         let hit_base_entity_result = part_query.get(base_part_mesh_query.get(*hit_entity).unwrap().base_part).unwrap();
 
         //println!("collider main is {:?}",a);
 
         let b = get_collider(hit_base_entity_result.0, hit_base_entity_result.1, part_registry.parts.get(&hit_base_entity_result.0.id).unwrap());
+        gizmos.cuboid(b, Color::srgb_u8(0,0,255));
+        gizmos.cuboid(b.with_scale(b.scale*3.0), Color::srgb_u8(0,0,255));
             //println!("collider secondary is {:?}",b);
-        dist=dist.min(to_touch(&a, &b, dir));
+        dist=dist.min(to_touch(&a, &b, dir, &mut gizmos));
         if dist==f32::INFINITY { return; }
-        let translation = dir.as_vec3()*dist;
+        println!("DIST IS {:?}",dist);
+        let translation = (hit.point-camera_transform.translation()).normalize()*dist;
         
 
-        println!("TRANSOFMRMED EVERYTHING BY {:?}",translation);
+        //println!("TRANSOFMRMED EVERYTHING BY {:?}",translation);
         for mut transform in &mut selected_query {
             transform.0.translation=camera_transform.translation()+translation;
+            println!("TRANSOFMRMED EVERYTHING TO {:?}",transform.0.translation);
             // transform.0.translation.x+=translation.x;
             // transform.0.translation.y+=translation.y;
             // transform.0.translation.z+=translation.z;
@@ -351,29 +357,34 @@ pub fn translate_floatings(
 
 
 
-enum Thing {
+#[derive(Debug, Copy, Clone)]
+pub enum Thing {
     Vertex(Vec3),
     Line(Vec3,Vec3),
     Plane(Vec3,Vec3,Vec3,Vec3)
 }
 
 ///how far a has to move in direction dir to touch b
-fn to_touch_thing(a: Thing, b: Thing, dir: Dir3) -> Option<f32>{
+pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3, gizmo: &mut Gizmos) -> Option<f32>{
     match a {
         Thing::Vertex(a_pos) => {
             match b {
                 Thing::Vertex(vec3) => None,
                 Thing::Line(vec3, vec4) => None,
                 Thing::Plane(plane_center, normal, normal2, normal3) => {
-                    let ray = Ray3d{ origin: a_pos, direction: dir};
-                    let hit = ray.intersect_plane(plane_center, InfinitePlane3d { normal: Dir3::new_unchecked(normal.normalize())});
+                    let ray = Ray3d{ origin: *a_pos, direction: *dir};
+                    let hit = ray.intersect_plane(*plane_center, InfinitePlane3d { normal: Dir3::new_unchecked(normal.normalize())});
+                    // println!("vertex hit was {:?}",hit);
 
                     if hit == None {return None;}
                     let hit = hit.unwrap();
+                    let hit_pos = a_pos + ((*dir)*hit);
                     if 
-                        ((hit-plane_center).dot(normal2.normalize())).abs() < normal2.length() &&
-                        ((hit-plane_center).dot(normal3.normalize())).abs() < normal3.length()
+                        ((hit_pos-plane_center).dot(normal2.normalize())).abs() <= normal2.length() &&
+                        ((hit_pos-plane_center).dot(normal3.normalize())).abs() <= normal3.length()
                     {
+                        gizmo.arrow(*a_pos, hit_pos, Color::srgb_u8(255, 0, 0));
+                        println!("we hit on {:?} on plane {:?} from {:?} with {:?}",hit_pos,b,a_pos,hit);
                         return Some(hit);
                     }else{
                         return None;
@@ -385,19 +396,37 @@ fn to_touch_thing(a: Thing, b: Thing, dir: Dir3) -> Option<f32>{
             match b {
                 Thing::Vertex(vec3) => None,
                 Thing::Line(b_start, b_end) => {
-                    let ray = Ray3d{ origin: b_start, direction: Dir3::new_unchecked((b_end-b_start).normalize())};
-                    let hit = ray.intersect_plane(a_start, InfinitePlane3d { normal: Dir3::new_unchecked(dir.cross(a_end-a_start).normalize())});
+                    //if true { return None; }
+                    let b_ray = Ray3d{ origin: *b_start, direction: Dir3::new_unchecked((b_end-b_start).normalize())};
+                    gizmo.arrow(*b_start, b_start+((b_end-b_start).normalize()*20.0), Color::srgb_u8(0, 255, 255));
+                    // println!("b_ray is {:?}",b_ray);
+                    let a_plane_normal = Dir3::new_unchecked(dir.cross(a_end-a_start).normalize());
+                    // println!("dir is {:?} and the a_line dir is {:?}",dir,(a_end-a_start));
+                    // println!("a_start is {:?} and a_plane_normal is {:?}",a_start,a_plane_normal);
+
+                    let hit = b_ray.intersect_plane(*a_start, InfinitePlane3d { normal: a_plane_normal });
+                    gizmo.sphere(*a_start, 0.2, Color::srgb_u8(255, 0, 255));
+                    gizmo.arrow(*a_start, a_start+*a_plane_normal, Color::srgb_u8(255, 0, 255));
+                    // println!("the dot of ray and normal is {:?}",b_ray.direction.dot(*a_plane_normal));
+                    // println!("line hit was {:?}",hit);
 
                     if hit == None {return None;}
                     let hit = hit.unwrap();
+                    let mut hit_pos = b_start + (b_ray.direction.normalize()*hit);
+                    let moved_dist = ((hit_pos-a_start).dot((dir).normalize()));
+                    //println!("hit_pos is {:?}",hit_pos);
+                    println!("hit_pos in offset is {:?}",(hit_pos-a_start));
+                    if moved_dist < 0.0 {return None;}
+                    gizmo.sphere(hit_pos, 0.1, Color::srgb_u8(0, 255, 0));
+                    //hit_pos = hit_pos - (*dir*moved_dist);
                     if 
-                        ((hit-a_start).dot((a_end-a_start).normalize())) <= (a_end-a_start).length()
+                        ((hit_pos-a_start).dot((a_end-a_start).normalize())) <= (a_end-a_start).length()
                             &&
-                        ((hit-a_start).dot((a_end-a_start).normalize())) >= 0.0
-                            &&
-                        ((hit-a_start).dot((dir).normalize())) >= 0.0
+                        ((hit_pos-a_start).dot((a_end-a_start).normalize())) >= 0.0
                     {
-                        return Some(((hit-a_start).dot((dir).normalize())));
+                        println!("with line line we got {:?}",moved_dist);
+                        gizmo.sphere(hit_pos, 0.1, Color::srgb_u8(0, 255, 0));
+                        return Some(moved_dist);
                     }else{
                         return None;
                     }
@@ -417,8 +446,17 @@ fn to_touch_thing(a: Thing, b: Thing, dir: Dir3) -> Option<f32>{
     }
 
 }
+pub fn all_things(a :&Transform) -> Vec<Thing> {
+    let mut things: Vec<Thing> = Vec::new();
 
-fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3) -> f32{
+
+    for i in 0..6 { let temp = cuboid_face(a, i); things.push(Thing::Plane(temp.1, temp.0.0, temp.0.1, temp.0.2)); }
+    for i in 0..8 { things.push(Thing::Vertex(cuboid_vertex(a, i))); }
+    for i in 0..12 { let temp = cuboid_edge(a, i); things.push(Thing::Line(temp.0, temp.1)); }
+    return things;
+}
+
+pub fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3, gizmo: &mut Gizmos) -> f32{
     
     
     //let new_a = Transform::from_matrix(a.compute_matrix()*a.compute_matrix().inverse());
@@ -437,33 +475,21 @@ fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3) -> f32{
     //
     //
     let mut min_dist=f32::INFINITY;
-    for k in 0..2 {
-        let temp = new_b;
-        new_b = new_a;
-        new_a = temp;
-        dir = Dir3::new_unchecked(dir * -1.0);
-        for i in 0..8 {
-            //let vertex = cuboid_vertex(a, i);
-            let ray = Ray3d{ origin: cuboid_vertex(&new_b, i), direction: Dir3::new_unchecked(dir*-1.0)};
-            for j in 0..6 {
-                let plane = cuboid_face(&new_a, j);
-                let dist_hit = ray.intersect_plane(plane.1, InfinitePlane3d { normal: Dir3::new_unchecked(plane.0.0.normalize()) });
-                let Some(dist) = dist_hit else {continue;};
-                let hit_pos = ray.origin+(ray.direction.as_vec3()*dist);
-                //println!("hitpos at {:?}",hit_pos);
-                // if hit_pos.x.abs()<=1.0 && hit_pos.y.abs()<=1.0 && hit_pos.z.abs()<=1.0 {
-                //     min_dist = min_dist.min(dist);
-                // }
-                if 
-                    ((hit_pos-plane.1).dot(plane.0.1.normalize())).abs() > plane.0.1.length() &&
-                    ((hit_pos-plane.1).dot(plane.0.2.normalize())).abs() > plane.0.2.length()
-                {
-                     min_dist = min_dist.min(dist);
-
-                }
+    let a_things: Vec<Thing> = all_things(new_a);
+    let b_things: Vec<Thing> = all_things(new_b);
+    for a_thing in a_things {
+        for b_thing in &b_things {
+            if let Some(dist) = to_touch_thing(&a_thing, &b_thing, &dir, gizmo){
+                min_dist = min_dist.min(dist);
             }
+
+            if let Some(dist) = to_touch_thing(&b_thing, &a_thing, &Dir3::new_unchecked(dir*-1.0), gizmo){
+                min_dist = min_dist.min(dist);
+            }
+
         }
     }
+    
 
 
 
@@ -485,20 +511,40 @@ fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3) -> f32{
 }
 
 fn cuboid_vertex(a: &Transform, i: u8) -> Vec3{
-    return a.translation+(a.forward()*neg(i&4))+(a.left()*neg(i&2))+(a.left()*neg(i&1));
+    return a.translation+(((a.forward()*neg(i&4)*a.scale.z)+(a.up()*neg(i&2)*a.scale.y)+(a.left()*neg(i&1)*a.scale.x)));
+}
+fn cuboid_edge(a: &Transform, i: u8) -> (Vec3, Vec3){
+    match(i){
+        0  => (cuboid_vertex(a, 0),cuboid_vertex(a, 1)), //left right
+        1  => (cuboid_vertex(a, 2),cuboid_vertex(a, 3)),
+        2  => (cuboid_vertex(a, 4),cuboid_vertex(a, 5)),
+        3  => (cuboid_vertex(a, 6),cuboid_vertex(a, 7)),
+
+        4  => (cuboid_vertex(a, 0),cuboid_vertex(a, 2)), //up down
+        5  => (cuboid_vertex(a, 1),cuboid_vertex(a, 3)),
+        6  => (cuboid_vertex(a, 4),cuboid_vertex(a, 6)),
+        7  => (cuboid_vertex(a, 5),cuboid_vertex(a, 7)),
+
+        8  => (cuboid_vertex(a, 0),cuboid_vertex(a, 4)), //forward backward
+        9  => (cuboid_vertex(a, 1),cuboid_vertex(a, 5)),
+        10 => (cuboid_vertex(a, 2),cuboid_vertex(a, 6)),
+        11 => (cuboid_vertex(a, 3),cuboid_vertex(a, 7)),
+        _ => {panic!("wtf")}
+    }
 }
 fn cuboid_face(a: &Transform, i: u8) -> ((Vec3,Vec3,Vec3), Vec3){
+    let s = a.scale/2.0;
     let dir = match(i){
-        0 => {(*a.forward()*a.scale.z,*a.left()*a.scale.x,*a.up()*a.scale.y)}
-        1 => {(*a.back()*a.scale.z,*a.left()*a.scale.x,*a.up()*a.scale.y)}
-        2 => {(*a.right()*a.scale.x,*a.forward()*a.scale.z,*a.up()*a.scale.y)}
-        3 => {(*a.left()*a.scale.x,*a.forward()*a.scale.z,*a.up()*a.scale.y)}
-        4 => {(*a.up()*a.scale.y,*a.forward()*a.scale.z,*a.left()*a.scale.x)}
-        5 => {(*a.down()*a.scale.y,*a.forward()*a.scale.z,*a.left()*a.scale.x)}
+        0 => {(*a.forward()*s.z,*a.left()*s.x,*a.up()*s.y)}
+        1 => {(*a.back()*s.z,*a.left()*s.x,*a.up()*s.y)}
+        2 => {(*a.right()*s.x,*a.forward()*s.z,*a.up()*s.y)}
+        3 => {(*a.left()*s.x,*a.forward()*s.z,*a.up()*s.y)}
+        4 => {(*a.up()*s.y,*a.forward()*s.z,*a.left()*s.x)}
+        5 => {(*a.down()*s.y,*a.forward()*s.z,*a.left()*s.x)}
         _ => {panic!("wtf")}
     };
-    //println!("cuboid face of {:?} is {:?}",a,a.translation+(dir*a.scale));
-    return (dir, a.translation+(dir.0*a.scale));
+    //println!("cuboid face of {:?} is {:?}",a,a.translation+(dir*s));
+    return (dir, a.translation+(dir.0));
 }
 fn neg(num: u8) -> f32{
     if num==0 {-0.5}else{0.5}
