@@ -1,7 +1,7 @@
 use core::f32;
 use std::{collections::VecDeque, iter::once, ops::DerefMut};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec3, Vec3A}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextFont}, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, gizmos::primitives::dim3::Plane3dBuilder, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec2, Vec3, Vec3A}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Primitive3d, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
 use bevy_mod_outline::OutlineVolume;
 use regex::Regex;
 use smol_str::SmolStr;
@@ -16,7 +16,8 @@ impl Plugin for EditorPlugin {
             EditorData {
                 action_history: Vec::new(),
                 queued_commands: Vec::new(),
-                floating: false
+                floating: false,
+                testing: Vec3::new(0.0,0.0,0.0)
             }
         );
         
@@ -72,7 +73,8 @@ impl Plugin for EditorPlugin {
 pub struct EditorData {
     action_history: Vec<Action>,
     queued_commands: Vec<QueuedCommand>, //use deque?
-    floating: bool
+    floating: bool,
+    testing: Vec3
 }
 
 #[derive(Resource)]
@@ -181,7 +183,7 @@ fn execute_queued_commands(
 }
 
 pub fn translate_floatings(
-    editor_data: Res<EditorData>,
+    mut editor_data: ResMut<EditorData>,
     camera_query: Single<(&Camera, &GlobalTransform)>,
     windows: Single<&Window>,
     mut ray_cast: MeshRayCast,
@@ -190,6 +192,7 @@ pub fn translate_floatings(
     part_query: Query<(&BasePart,Option<&AdjustableHull>)>,
     base_part_mesh_query: Query<&BasePartMesh>,
     part_registry: Res<PartRegistry>,
+    key: Res<ButtonInput<KeyCode>>,
 ) {
     let (camera, camera_transform) = *camera_query;
 
@@ -218,6 +221,12 @@ pub fn translate_floatings(
         return;
     };
 
+    if key.just_pressed(KeyCode::Space){
+        //editor_data.testing = camera_transform.translation() + (camera_transform.forward()*10.0);
+
+    }
+    editor_data.testing = camera_transform.translation();
+
 
     if editor_data.floating {
         if selected_query.is_empty() { return; }
@@ -228,13 +237,14 @@ pub fn translate_floatings(
         // }
         // average_pos/=selected_query.iter().len() as f32;
 
-        let dir = Dir3::new_unchecked((hit.point-camera_transform.translation()).normalize());
+        //let camera_translation = camera_transform.translation() + (camera_transform.forward()*10.0);
+        let camera_translation = editor_data.testing;
+        let dir = Dir3::new_unchecked((hit.point-camera_translation).normalize());
         let mut dist=f32::INFINITY;
 
         let main_selected = selected_query.get_single().unwrap();
         let mut a = get_collider(main_selected.1, main_selected.2, part_registry.parts.get(&main_selected.1.id).unwrap());
-        gizmos.cuboid(a, Color::srgb_u8(0,0,255));
-        a.translation=camera_transform.translation();
+        a.translation=camera_translation;
         gizmos.cuboid(a, Color::srgb_u8(0,0,255));
 
         let hit_base_entity_result = part_query.get(base_part_mesh_query.get(*hit_entity).unwrap().base_part).unwrap();
@@ -243,17 +253,17 @@ pub fn translate_floatings(
 
         let b = get_collider(hit_base_entity_result.0, hit_base_entity_result.1, part_registry.parts.get(&hit_base_entity_result.0.id).unwrap());
         gizmos.cuboid(b, Color::srgb_u8(0,0,255));
-        gizmos.cuboid(b.with_scale(b.scale*3.0), Color::srgb_u8(0,0,255));
+        //gizmos.cuboid(b.with_scale(b.scale*3.0), Color::srgb_u8(0,0,255));
             //println!("collider secondary is {:?}",b);
         dist=dist.min(to_touch(&a, &b, dir, &mut gizmos));
         if dist==f32::INFINITY { return; }
         println!("DIST IS {:?}",dist);
-        let translation = (hit.point-camera_transform.translation()).normalize()*dist;
+        let translation = (hit.point-camera_translation).normalize()*dist;
         
 
         //println!("TRANSOFMRMED EVERYTHING BY {:?}",translation);
         for mut transform in &mut selected_query {
-            transform.0.translation=camera_transform.translation()+translation;
+            transform.0.translation=camera_translation+translation;
             println!("TRANSOFMRMED EVERYTHING TO {:?}",transform.0.translation);
             // transform.0.translation.x+=translation.x;
             // transform.0.translation.y+=translation.y;
@@ -365,13 +375,14 @@ pub enum Thing {
 }
 
 ///how far a has to move in direction dir to touch b
-pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3, gizmo: &mut Gizmos) -> Option<f32>{
+pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3, draw_gizmo: bool, gizmo: &mut Gizmos) -> Option<f32>{
     match a {
         Thing::Vertex(a_pos) => {
             match b {
                 Thing::Vertex(vec3) => None,
                 Thing::Line(vec3, vec4) => None,
                 Thing::Plane(plane_center, normal, normal2, normal3) => {
+                    //if true { return None; }
                     let ray = Ray3d{ origin: *a_pos, direction: *dir};
                     let hit = ray.intersect_plane(*plane_center, InfinitePlane3d { normal: Dir3::new_unchecked(normal.normalize())});
                     // println!("vertex hit was {:?}",hit);
@@ -383,7 +394,7 @@ pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3, gizmo: &mut Gizmos) -> O
                         ((hit_pos-plane_center).dot(normal2.normalize())).abs() <= normal2.length() &&
                         ((hit_pos-plane_center).dot(normal3.normalize())).abs() <= normal3.length()
                     {
-                        gizmo.arrow(*a_pos, hit_pos, Color::srgb_u8(255, 0, 0));
+                        //gizmo.arrow(*a_pos, hit_pos, Color::srgb_u8(255, 0, 0));
                         println!("we hit on {:?} on plane {:?} from {:?} with {:?}",hit_pos,b,a_pos,hit);
                         return Some(hit);
                     }else{
@@ -397,45 +408,72 @@ pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3, gizmo: &mut Gizmos) -> O
                 Thing::Vertex(vec3) => None,
                 Thing::Line(b_start, b_end) => {
                     //if true { return None; }
-                    let b_ray = Ray3d{ origin: *b_start, direction: Dir3::new_unchecked((b_end-b_start).normalize())};
-                    gizmo.arrow(*b_start, b_start+((b_end-b_start).normalize()*20.0), Color::srgb_u8(0, 255, 255));
+                    if(draw_gizmo){gizmo.line(*a_start, *a_end, Color::srgb_u8(255, 255, 0));}
+                    if(draw_gizmo){gizmo.line(*b_start, *b_end, Color::srgb_u8(0, 255, 255));}
+                    //gizmo.arrow((a_start+a_end)/2.0, ((a_start+a_end)/2.0)+(dir.as_vec3()), Color::srgb_u8(0, 255, 255));
+                    let b_dir = (b_end-b_start);
+                    let b_ray = Ray3d{ origin: *b_start, direction: Dir3::new_unchecked(b_dir.normalize())};
+                    let b_middle = ((b_end+b_start)/2.0);
+                    //println!("b_start is {:?} b_middle is {:?}",b_start,b_middle);
+                    if(draw_gizmo){gizmo.arrow(*b_start, b_middle, Color::srgb_u8(255, 0, 255));}
+                    let a_dir = (a_end-a_start);
                     // println!("b_ray is {:?}",b_ray);
-                    let a_plane_normal = Dir3::new_unchecked(dir.cross(a_end-a_start).normalize());
+                    let a_plane_normal = Dir3::new_unchecked(dir.cross(a_dir).normalize());
                     // println!("dir is {:?} and the a_line dir is {:?}",dir,(a_end-a_start));
                     // println!("a_start is {:?} and a_plane_normal is {:?}",a_start,a_plane_normal);
+                    if(draw_gizmo){gizmo.primitive_3d(&Plane3d::new(*a_plane_normal, Vec2::new(5.0,5.0)), (*a_start), Color::srgb_u8(0, 255, 0));}
+                    if(draw_gizmo){gizmo.arrow(*a_start, (*a_start)+(dir.as_vec3()), Color::srgb_u8(255, 0, 0));}
+                    if(draw_gizmo){gizmo.arrow(*a_start, (*a_start)+(a_dir.normalize()), Color::srgb_u8(0, 0, 255));}
 
                     let hit = b_ray.intersect_plane(*a_start, InfinitePlane3d { normal: a_plane_normal });
-                    gizmo.sphere(*a_start, 0.2, Color::srgb_u8(255, 0, 255));
-                    gizmo.arrow(*a_start, a_start+*a_plane_normal, Color::srgb_u8(255, 0, 255));
                     // println!("the dot of ray and normal is {:?}",b_ray.direction.dot(*a_plane_normal));
                     // println!("line hit was {:?}",hit);
 
                     if hit == None {return None;}
                     let hit = hit.unwrap();
-                    let mut hit_pos = b_start + (b_ray.direction.normalize()*hit);
-                    let moved_dist = ((hit_pos-a_start).dot((dir).normalize()));
-                    //println!("hit_pos is {:?}",hit_pos);
-                    println!("hit_pos in offset is {:?}",(hit_pos-a_start));
-                    if moved_dist < 0.0 {return None;}
-                    gizmo.sphere(hit_pos, 0.1, Color::srgb_u8(0, 255, 0));
-                    //hit_pos = hit_pos - (*dir*moved_dist);
+                    if hit > b_dir.length() { return None; }
+
+                    let hit_pos = b_start + (b_ray.direction.normalize()*hit);
+                    if(draw_gizmo){gizmo.sphere(hit_pos, 0.5, Color::srgb_u8(255, 255, 255));}
+                    if(draw_gizmo){gizmo.arrow(*a_start, hit_pos, Color::srgb_u8(255, 255, 255));}
+                    if(draw_gizmo){gizmo.arrow(*b_start, hit_pos, Color::srgb_u8(255, 255, 255));}
+
+                    let hit_offset = (hit_pos-a_start);
+
+                    let a_dir_dirs = a_dir.dot(dir.as_vec3());
+                    let perp_a_dir = a_dir - (a_dir_dirs*dir.as_vec3());
+                    //println!("a_dir_dirs is {:?} and perp_a_dir is {:?}",a_dir_dirs,perp_a_dir);
+                    //println!("the cross is {:?}",perp_a_dir.normalize().cross(dir.as_vec3()).length());
+                    //gizmo.arrow(*a_start, a_start+perp_a_dir, Color::srgb_u8(255, 0, 255));
+
+                    let hit_offset_perp_a_dirs = hit_offset.dot(perp_a_dir.normalize()); //raw length
+
+                    //let offset1 = (perp_a_dir.normalize()*hit_offset_perp_a_dirs);
+                    let offset1 = ((hit_offset_perp_a_dirs/perp_a_dir.length())*a_dir);
+                    if(draw_gizmo){gizmo.arrow(*a_start, a_start+offset1, Color::srgb_u8(255, 0, 0));}
+                    if(draw_gizmo){println!("the thing is {:?}",(hit_offset-offset1).cross(**dir));}
+                    let offset2 = dir.as_vec3()*(hit_offset-offset1).length();
+                    if(draw_gizmo){gizmo.arrow(*a_start+offset1, a_start+offset1+offset2, Color::srgb_u8(255, 0, 255));}
+                    if(draw_gizmo){println!("hit offset was {:?} which had {:?} perp_a_dir in it ",hit_offset,hit_offset_perp_a_dirs);}
+
+                    //gizmo.sphere(a_start+(perp_a_dir*hit_offset_perp_a_dirs), 0.2, Color::srgb_u8(255, 0, 255));
+
                     if 
-                        ((hit_pos-a_start).dot((a_end-a_start).normalize())) <= (a_end-a_start).length()
-                            &&
-                        ((hit_pos-a_start).dot((a_end-a_start).normalize())) >= 0.0
+                        hit_offset_perp_a_dirs > (perp_a_dir).length()
+                            ||
+                        hit_offset_perp_a_dirs < 0.0
                     {
-                        println!("with line line we got {:?}",moved_dist);
-                        gizmo.sphere(hit_pos, 0.1, Color::srgb_u8(0, 255, 0));
-                        return Some(moved_dist);
-                    }else{
                         return None;
                     }
-                    // let thing = line_line_intersect(a_start, a_end, b_start, b_end);
-                    // if thing == None {return None;}
-                    // let thing = thing.unwrap();
-                    // if (thing.2-thing.3).length() <= f32::EPSILON {
-                    //     return 
-                    // }
+                    //println!("removing {:?} from {:?}hitoffset makes it",(hit_offset_perp_a_dirs*a_dir_dirs)*dir.as_vec3(),hit_offset);
+                    //let all_dir = (hit_offset-(((hit_offset_perp_a_dirs/perp_a_dir.length())*a_dir_dirs)*dir.as_vec3()));
+                    let all_dir = (hit_offset-((hit_offset_perp_a_dirs/perp_a_dir.length())*a_dir));
+                    //println!("all dir is {:?}",all_dir);
+                    let moved_dist = all_dir.length();
+                    
+                    if moved_dist < 0.0 { return None; }
+                    return Some(moved_dist);
+                    
                 },
                 Thing::Plane(vec3, vec4, vec5, vec6) => None,
             }
@@ -477,18 +515,33 @@ pub fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3, gizmo: &mut Gizmos)
     let mut min_dist=f32::INFINITY;
     let a_things: Vec<Thing> = all_things(new_a);
     let b_things: Vec<Thing> = all_things(new_b);
+    let mut best_thing_a = a_things[0];
+    let mut best_thing_b = b_things[0];
     for a_thing in a_things {
         for b_thing in &b_things {
-            if let Some(dist) = to_touch_thing(&a_thing, &b_thing, &dir, gizmo){
-                min_dist = min_dist.min(dist);
+            if let Some(dist) = to_touch_thing(&a_thing, &b_thing, &dir, false, gizmo){
+                if dist <= min_dist {
+                    best_thing_a = a_thing;
+                    best_thing_b = *b_thing;
+                    min_dist = min_dist.min(dist);
+                }
             }
 
-            if let Some(dist) = to_touch_thing(&b_thing, &a_thing, &Dir3::new_unchecked(dir*-1.0), gizmo){
-                min_dist = min_dist.min(dist);
+            if let Some(dist) = to_touch_thing(&b_thing, &a_thing, &Dir3::new_unchecked(dir*-1.0), false, gizmo){
+                if core::mem::discriminant(&a_thing) != core::mem::discriminant(&b_thing) {
+                    min_dist = min_dist.min(dist);
+                }
             }
 
         }
     }
+
+    // let Thing::Line(a_start,a_end) = best_thing_a else { return min_dist; };
+    // let Thing::Line(b_start,b_end) = best_thing_b else { return min_dist; };
+    // gizmo.arrow(a_start, b_start, Color::srgb_u8(255, 0, 0));
+    // gizmo.arrow(a_end, b_end, Color::srgb_u8(255, 0, 0));
+    // to_touch_thing(&best_thing_a, &best_thing_b, &dir, true, gizmo);
+
     
 
 

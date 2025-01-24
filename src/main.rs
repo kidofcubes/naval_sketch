@@ -96,7 +96,7 @@ fn temp_test_update(
 
     //println!("totouchthing {:?}",to_touch_thing(&vertex, &up_plane, &Dir3::NEG_Y,&mut gizmo));
     //println!("totouchthing {:?}",to_touch_thing(&line1, &line2, &Dir3::NEG_Y,&mut gizmo));
-    println!("totouchthing {:?}",to_touch_thing(&line3, &line4, &Dir3::NEG_Y,&mut gizmo));
+    //println!("totouchthing {:?}",to_touch_thing(&line3, &line4, &Dir3::NEG_Y,&mut gizmo));
 
     // let cube_1 = Transform::from_translation(Vec3::new(10.0, 10.0, 10.0)).with_scale(Vec3::new(5.0,1.0,5.0));
     // for cube_thing in all_things(&cube_1) {
@@ -216,16 +216,16 @@ fn setup(
                 }));
         
 
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::default())),
-            MeshMaterial3d(materials.add(Color::srgb_u8(0, 0, 255))),
-            Transform::from_translation(Vec3::new(0.0,30.0,0.0))
-        ));
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::default())),
-            MeshMaterial3d(materials.add(Color::srgb_u8(255, 0, 0))),
-            Transform::from_translation(Vec3::new(0.0,30.0,1.0))
-        ));
+        // commands.spawn((
+        //     Mesh3d(meshes.add(Cuboid::default())),
+        //     MeshMaterial3d(materials.add(Color::srgb_u8(0, 0, 255))),
+        //     Transform::from_translation(Vec3::new(0.0,30.0,0.0))
+        // ));
+        // commands.spawn((
+        //     Mesh3d(meshes.add(Cuboid::default())),
+        //     MeshMaterial3d(materials.add(Color::srgb_u8(255, 0, 0))),
+        //     Transform::from_translation(Vec3::new(0.0,30.0,1.0))
+        // ));
 
 
         
@@ -264,32 +264,32 @@ fn main() {
         
 
 
-        App::new()
-            .add_plugins((
-                    DefaultPlugins.build(),
-                    CameraMovementPlugin,
-                    ))
-            .add_systems(Update, (temp_test_update))
-
-
-            .run();
-
-
         // App::new()
-        //     .insert_resource(InitData {file_path: file_path.to_string()})
-        //     .insert_resource(PartRegistry {parts: HashMap::new()})
         //     .add_plugins((
         //             DefaultPlugins.build(),
         //             CameraMovementPlugin,
-        //             MeshPickingPlugin,
-        //             EditorPlugin,
-        //             //OutlinePlugin,
         //             ))
-        //     .add_systems(Startup, (register_all_parts.before(setup),setup))
-        //     .add_systems(Update, (temp_test_update, on_part_meshes_init))
+        //     .add_systems(Update, (temp_test_update))
         //
         //
         //     .run();
+
+
+        App::new()
+            .insert_resource(InitData {file_path: file_path.to_string()})
+            .insert_resource(PartRegistry {parts: HashMap::new()})
+            .add_plugins((
+                    DefaultPlugins.build(),
+                    CameraMovementPlugin,
+                    MeshPickingPlugin,
+                    EditorPlugin,
+                    //OutlinePlugin,
+                    ))
+            .add_systems(Startup, (register_all_parts.before(setup),setup))
+            .add_systems(Update, (temp_test_update, on_part_meshes_init))
+
+
+            .run();
 
         return;
     }
