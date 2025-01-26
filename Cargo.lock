@@ -887,21 +887,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_mod_outline"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "380a62f1c85e631a884b642e380d3ad2dbb15d4fbeb9cb35bcbd97efa8de1136"
-dependencies = [
- "bevy",
- "bevy_image",
- "bitfield",
- "interpolation",
- "nonmax",
- "thiserror 1.0.69",
- "wgpu-types",
-]
-
-[[package]]
 name = "bevy_pbr"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1359,12 +1344,6 @@ name = "bit-vec"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
-
-[[package]]
-name = "bitfield"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c821a6e124197eb56d907ccc2188eab1038fb919c914f47976e64dd8dbc855d1"
 
 [[package]]
 name = "bitflags"
@@ -2872,12 +2851,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "interpolation"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9c13ae9d91148fcb4aab6654c4c2a7d02a15395ea9e23f65170f175f8b269ce"
-
-[[package]]
 name = "io-kit-sys"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3223,7 +3196,6 @@ name = "naval_fart"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_mod_outline",
  "chrono",
  "dirs",
  "quick-xml 0.37.2",

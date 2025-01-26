@@ -5,8 +5,7 @@ mod editor_ui;
 mod parts;
 mod asset_extractor;
 
-use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::mesh::{Extrudable, Indices}, utils::HashMap, window::CursorGrabMode};
-use bevy_mod_outline::OutlinePlugin;
+use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{mesh::{Extrudable, Indices}, settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::HashMap, window::CursorGrabMode};
 use cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text, CameraMovementPlugin};
 use editor::{all_things, to_touch_thing, EditorPlugin, Thing};
 use parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
@@ -62,35 +61,35 @@ fn temp_test_update(
             // ;
         }
     }
-    gizmo.cuboid(Transform::from_translation(Vec3::new(0.0,30.0,0.0)), Color::srgb_u8(0, 255, 0));
-    gizmo.cuboid(Transform::from_translation(Vec3::new(0.0,30.0,1.0)), Color::srgb_u8(0, 255, 0));
-
-    let up_plane = Thing::Plane(Vec3::ZERO, *Dir3::Y, *Dir3::Z, *Dir3::X);
-    let vertex = Thing::Vertex(Vec3 { x: 0.0, y: 3.5, z: 0.0 });
-    let line1 = Thing::Line(
-        Vec3 { x: 0.0, y: 5.0, z: 0.0 },
-        Vec3 { x: 0.01, y: 10.0, z: 3.0 }
-    );
-    let line2 = Thing::Line(
-        Vec3 { x: -0.01, y: -4.0, z: -0.1 },
-        Vec3 { x: 0.0, y: -8.0, z: 0.0 }
-    );
-
-
-
-    let line3 = Thing::Line(
-        Vec3::new(1.0,10.0,-1.0),
-        Vec3::new(-1.0,5.0,1.0)
-    );
-
-    let line4 = Thing::Line(
-        Vec3::new(-1.0,-10.0,-1.0),
-        Vec3::new(1.0,-5.0,1.0)
-    );
-
-    if let Thing::Line(start,end) = line3 {gizmo.line(start, end, Color::srgb_u8(255, 0, 0));}
-    if let Thing::Line(start,end) = line4 {gizmo.line(start, end, Color::srgb_u8(0, 0, 255));}
-    gizmo.cuboid(Transform::from_scale(Vec3::new(2.0,20.0,2.0)), Color::WHITE);
+    // gizmo.cuboid(Transform::from_translation(Vec3::new(0.0,30.0,0.0)), Color::srgb_u8(0, 255, 0));
+    // gizmo.cuboid(Transform::from_translation(Vec3::new(0.0,30.0,1.0)), Color::srgb_u8(0, 255, 0));
+    //
+    // let up_plane = Thing::Plane(Vec3::ZERO, *Dir3::Y, *Dir3::Z, *Dir3::X);
+    // let vertex = Thing::Vertex(Vec3 { x: 0.0, y: 3.5, z: 0.0 });
+    // let line1 = Thing::Line(
+    //     Vec3 { x: 0.0, y: 5.0, z: 0.0 },
+    //     Vec3 { x: 0.01, y: 10.0, z: 3.0 }
+    // );
+    // let line2 = Thing::Line(
+    //     Vec3 { x: -0.01, y: -4.0, z: -0.1 },
+    //     Vec3 { x: 0.0, y: -8.0, z: 0.0 }
+    // );
+    //
+    //
+    //
+    // let line3 = Thing::Line(
+    //     Vec3::new(1.0,10.0,-1.0),
+    //     Vec3::new(-1.0,5.0,1.0)
+    // );
+    //
+    // let line4 = Thing::Line(
+    //     Vec3::new(-1.0,-10.0,-1.0),
+    //     Vec3::new(1.0,-5.0,1.0)
+    // );
+    //
+    // if let Thing::Line(start,end) = line3 {gizmo.line(start, end, Color::srgb_u8(255, 0, 0));}
+    // if let Thing::Line(start,end) = line4 {gizmo.line(start, end, Color::srgb_u8(0, 0, 255));}
+    // gizmo.cuboid(Transform::from_scale(Vec3::new(2.0,20.0,2.0)), Color::WHITE);
     
 
 
@@ -162,6 +161,7 @@ fn setup(
     part_registry: Res<PartRegistry>,
     //mut scene_assets: ResMut<Assets<Scene>>,
     mut ambient_light: ResMut<AmbientLight>,
+    mut config_store: ResMut<GizmoConfigStore>,
 ) {
 
     let path = init_data.file_path.clone();
@@ -246,7 +246,12 @@ fn setup(
     ));
     ambient_light.brightness = 2000.0;
 
+
     //commands.spawn();
+
+    let (config, _) = config_store.config_mut::<DefaultGizmoConfigGroup>();
+
+    config.depth_bias = -1.0;
 
 
 
@@ -298,8 +303,25 @@ fn main() {
     App::new()
         .insert_resource(InitData {file_path: file_path.to_string()})
         .insert_resource(PartRegistry {parts: HashMap::new()})
+        .insert_resource(WireframeConfig {
+            // The global wireframe config enables drawing of wireframes on every mesh,
+            // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
+            // regardless of the global configuration.
+            global: false,
+            // Controls the default color of all wireframes. Used as the default color for global wireframes.
+            // Can be changed per mesh using the `WireframeColor` component.
+            default_color: Color::WHITE,
+        })
         .add_plugins((
-                DefaultPlugins.build(),
+                DefaultPlugins.set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                        // WARN this is a native only feature. It will not work with webgl or webgpu
+                        features: WgpuFeatures::POLYGON_MODE_LINE,
+                        ..default()
+                    }),
+                    ..default()
+                }),
+                WireframePlugin,
                 CameraMovementPlugin,
                 MeshPickingPlugin,
                 EditorPlugin,

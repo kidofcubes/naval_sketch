@@ -1,11 +1,10 @@
 use core::f32;
 use std::{iter::once, ops::DerefMut};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextFont, TextLayout}, ui::{BackgroundColor, Node, PositionType, Val}, utils::default, window::Window};
-use bevy_mod_outline::OutlineVolume;
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextFont, TextLayout}, ui::{BackgroundColor, Node, PositionType, Val}, utils::default, window::Window};
 use regex::Regex;
 
-use crate::{editor::{CommandData, Selected}, parsing::{AdjustableHull, BasePart}, parts::{base_part_to_bevy_transform, get_collider, unity_to_bevy_translation, PartRegistry}};
+use crate::{editor::{cuboid_face, dir_from_index, get_nearby, CommandData, Selected}, parsing::{AdjustableHull, BasePart}, parts::{base_part_to_bevy_transform, get_collider, unity_to_bevy_translation, PartRegistry}};
 
 
 #[derive(Resource)]
@@ -96,6 +95,8 @@ pub struct Hovered{}
 
 pub fn render_gizmos(
     hovered: Query<(&BasePart,Option<&AdjustableHull>),With<Hovered>>,
+    selected: Query<(&BasePart,Option<&AdjustableHull>),With<Selected>>,
+    all_parts: Query<(&BasePart,Option<&AdjustableHull>)>,
     part_registry: Res<PartRegistry>,
     mut gizmos: Gizmos
 ){
@@ -103,6 +104,52 @@ pub fn render_gizmos(
         // gizmos.cuboid(
         //     get_collider(hovered.0, hovered.1, part_registry.parts.get(&hovered.0.id).unwrap()),
         //     Color::srgb_u8(0, 255, 0)
+        // );
+    }
+
+    let mut other_parts = Vec::new();
+    for part in &all_parts {
+        other_parts.push(get_collider(part.0, part.1, part_registry.parts.get(&part.0.id).unwrap()))
+    }
+
+    for selected in &selected{
+        let bounding_box = get_collider(selected.0, selected.1, part_registry.parts.get(&selected.0.id).unwrap());
+        gizmos.cuboid(
+            bounding_box,
+            Color::srgb_u8(0, 255, 0)
+        );
+        let nearbys = get_nearby(&bounding_box, &other_parts, &mut gizmos);
+        for pair in nearbys.iter() {
+            let actual_side = Dir3::new_unchecked(
+                bounding_box.rotation.mul_vec3(dir_from_index(pair.0))
+            );
+            let color = match(pair.0){
+                0 => Color::srgb_u8(255, 255, 0),
+                1 => Color::srgb_u8(255, 0, 255),
+                2 => Color::srgb_u8(0, 255, 255),
+                3 => Color::srgb_u8(255, 0, 0),
+                4 => Color::srgb_u8(0, 255, 0),
+                5 => Color::srgb_u8(0, 0, 255),
+                _ => {panic!("wtfrick")}
+            };
+
+            for nearby in pair.1 {
+                gizmos.cuboid(
+                    **nearby,
+                    color
+                );
+            }
+
+            // gizmos.cuboid(
+            //     *nearby,
+            //     Color::srgb_u8(255, 0, 255)
+            // );
+        }
+        let forward_face = cuboid_face(&bounding_box, 0);
+        // gizmos.rect(
+        //     Isometry3d::new(forward_face.1, bounding_box.rotation),
+        //     Vec2::new(forward_face.0.1.length()*2.0,forward_face.0.2.length()*2.0),
+        //     Color::srgb_u8(255, 0, 0)
         // );
     }
 }
@@ -208,7 +255,7 @@ pub fn update_selected(
     removed.read().for_each(|base_entity| {
         for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
             if material_query.contains(entity) {
-                commands.entity(entity).remove::<OutlineVolume>();
+                //commands.entity(entity).remove::<OutlineVolume>();
             }
         }
     });

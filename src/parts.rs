@@ -297,7 +297,7 @@ pub fn base_part_to_bevy_transform(base_part: &BasePart) -> Transform{
                 base_part.rotation.x.to_radians(),
                 base_part.rotation.z.to_radians(),
             ))
-            .with_scale(base_part.scale);
+            .with_scale(base_part.scale.abs()); //absed because yeah
 
     let new_quat = Quat::from_xyzw(
         -transform.rotation.x, 
