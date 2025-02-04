@@ -4,10 +4,11 @@ mod editor;
 mod editor_ui;
 mod parts;
 mod asset_extractor;
+mod editor_utils;
 
 use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{mesh::{Extrudable, Indices}, settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::HashMap, window::CursorGrabMode};
 use cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text, CameraMovementPlugin};
-use editor::{all_things, to_touch_thing, EditorPlugin, Thing};
+use editor::{EditorPlugin};
 use parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
 use parts::{on_part_meshes_init, place_part, register_all_parts, PartRegistry};
 use std::{cmp::{max, min}, env, f32::consts::FRAC_PI_2, path::Path};

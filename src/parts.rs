@@ -316,3 +316,8 @@ pub fn unity_to_bevy_translation(pos: &Vec3) -> Vec3{
     new_pos.x=-new_pos.x;
     return new_pos;
 }
+pub fn bevy_to_unity_translation(pos: &Vec3) -> Vec3{
+    let mut new_pos = pos.clone();
+    new_pos.x=-new_pos.x;
+    return new_pos;
+}
