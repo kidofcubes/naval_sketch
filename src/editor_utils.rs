@@ -230,7 +230,7 @@ pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3/* , draw_gizmo: bool, giz
                 Thing::Vertex(vec3) => None,
                 Thing::Line(vec3, vec4) => None,
                 Thing::Plane(plane_center, normal, normal2, normal3) => {
-                    // if true { return None; }
+                    //if true { return None; }
                     let ray = Ray3d{ origin: *a_pos, direction: *dir};
                     let hit = ray.intersect_plane(*plane_center, InfinitePlane3d { normal: Dir3::new_unchecked(normal.normalize())});
                     // println!("vertex hit was {:?}",hit);
@@ -243,7 +243,7 @@ pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3/* , draw_gizmo: bool, giz
                         ((hit_pos-plane_center).dot(normal3.normalize())).abs() <= normal3.length()
                     {
                         //gizmo.arrow(*a_pos, hit_pos, Color::srgb_u8(255, 0, 0));
-                        println!("we hit on {:?} on plane {:?} from {:?} with {:?}",hit_pos,b,a_pos,hit);
+                        //println!("we hit on {:?} on plane {:?} from {:?} with {:?}",hit_pos,b,a_pos,hit);
                         return Some(hit);
                     }else{
                         return None;
@@ -255,7 +255,7 @@ pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3/* , draw_gizmo: bool, giz
             match b {
                 Thing::Vertex(vec3) => None,
                 Thing::Line(b_start, b_end) => {
-                    // if true { return None; }
+                    if true { return None; }
                     // if(draw_gizmo){gizmo.line(*a_start, *a_end, Color::srgb_u8(255, 255, 0));}
                     // if(draw_gizmo){gizmo.line(*b_start, *b_end, Color::srgb_u8(0, 255, 255));}
                     //gizmo.arrow((a_start+a_end)/2.0, ((a_start+a_end)/2.0)+(dir.as_vec3()), Color::srgb_u8(0, 255, 255));
@@ -360,6 +360,9 @@ pub fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3/* , gizmo: &mut Gizm
     // new_b.vertex[0https://gizmodo.com/picture-of-a-duck-accidentally-sent-to-stripe-workers-being-laid-off-2000552964]
     //
     //
+
+    // gizmo.cuboid(new_a, Color::srgb_u8(0,0,255));
+    // gizmo.cuboid(new_b, Color::srgb_u8(0,0,255));
     let mut min_dist=f32::INFINITY;
     let a_things: Vec<Thing> = all_things(new_a);
     let b_things: Vec<Thing> = all_things(new_b);
@@ -375,8 +378,8 @@ pub fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3/* , gizmo: &mut Gizm
                 }
             }
 
-            if let Some(dist) = to_touch_thing(&b_thing, &a_thing, &Dir3::new_unchecked(dir*-1.0)/* , false, gizmo */){
-                if core::mem::discriminant(&a_thing) != core::mem::discriminant(&b_thing) {
+            if core::mem::discriminant(&a_thing) != core::mem::discriminant(&b_thing) {
+                if let Some(dist) = to_touch_thing(&b_thing, &a_thing, &Dir3::new_unchecked(dir*-1.0)/* , false, gizmo */){
                     min_dist = min_dist.min(dist);
                 }
             }
@@ -390,6 +393,12 @@ pub fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3/* , gizmo: &mut Gizm
     // gizmo.arrow(a_end, b_end, Color::srgb_u8(255, 0, 0));
     // to_touch_thing(&best_thing_a, &best_thing_b, &dir, true, gizmo);
 
+    // let Thing::Vertex(a_point) = best_thing_a else { return min_dist; };
+    // let Thing::Plane(plane_center, normal, normal2, normal3) = best_thing_b else { return min_dist; };
+    //
+    // arrow(gizmo, a_point, (*dir)*min_dist, Color::srgb_u8(255, 0, 0));
+    // gizmo.sphere(a_point+((*dir)*min_dist), 1.0, Color::srgb_u8(255, 0, 0));
+    // println!("THE MIN_DIST WAS {:?}",min_dist);
     
 
 
@@ -412,7 +421,7 @@ pub fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3/* , gizmo: &mut Gizm
 }
 
 pub fn cuboid_vertex(a: &Transform, i: u8) -> Vec3{
-    return a.translation+(((a.forward()*neg(i&4)*a.scale.z)+(a.up()*neg(i&2)*a.scale.y)+(a.left()*neg(i&1)*a.scale.x)));
+    return a.translation+(((a.back()*neg(i&4)*a.scale.z)+(a.up()*neg(i&2)*a.scale.y)+(a.right()*neg(i&1)*a.scale.x)));
 }
 pub fn cuboid_edge(a: &Transform, i: u8) -> (Vec3, Vec3){
     match(i){

@@ -142,7 +142,7 @@ pub fn render_gizmos(
             let selected_shared_face = cuboid_face(&selected_bounding_box,i);
 
 
-            for nearby in dir_nearbys.get(&i).unwrap() {
+            for nearby in dir_nearbys.get(&i).unwrap_or(&Vec::new()) {
 
                 if simple_closest_dist(&selected_bounding_box, nearby.0) > (1.0) {
                     continue;

@@ -1,7 +1,7 @@
 use core::f32;
 use std::{collections::VecDeque, iter::once, ops::{Deref, DerefMut}};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, gizmos::{gizmos, primitives::dim3::Plane3dBuilder}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec2, Vec3, Vec3A}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoConfig, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Primitive3d, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::{List, Map}, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, gizmos::{gizmos, primitives::dim3::Plane3dBuilder}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec2, Vec3, Vec3A, VectorSpace}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoConfig, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Primitive3d, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::{List, Map}, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
 use regex::Regex;
 use smol_str::SmolStr;
 
@@ -25,10 +25,15 @@ impl Plugin for EditorPlugin {
         command_tree.add_command(b"a");
         command_tree.add_command(b"s");
         command_tree.add_command(b"d");
+        command_tree.add_command(b"q");
+        command_tree.add_command(b"e");
+
         command_tree.add_command(b"W");
         command_tree.add_command(b"A");
         command_tree.add_command(b"S");
         command_tree.add_command(b"D");
+        command_tree.add_command(b"Q");
+        command_tree.add_command(b"E");
 
         command_tree.add_command(b"f");
         command_tree.add_command(b"F");
@@ -163,10 +168,15 @@ fn execute_queued_commands(
             "A" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_X, queued_command.multiplier),
             "S" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::Z, queued_command.multiplier),
             "D" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::X, queued_command.multiplier),
+            "Q" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_Y, queued_command.multiplier),
+            "E" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::Y, queued_command.multiplier),
+
             "w" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_Z, queued_command.multiplier),
             "a" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_X, queued_command.multiplier),
             "s" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::Z, queued_command.multiplier),
             "d" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::X, queued_command.multiplier),
+            "q" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_Y, queued_command.multiplier),
+            "e" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::Y, queued_command.multiplier),
             "F" => {flip_floating=true;}
             _ => {}
         }
@@ -191,7 +201,7 @@ pub fn translate_floatings(
     camera_query: Single<(&Camera, &GlobalTransform)>,
     windows: Single<&Window>,
     mut ray_cast: MeshRayCast,
-    mut gizmos: Gizmos,
+    mut gizmo: Gizmos,
     mut selected_query: Query<Entity, With<Selected>>,
     mut part_query: Query<(&mut BasePart,Option<&AdjustableHull>,&mut Transform)>,
     base_part_mesh_query: Query<&BasePartMesh>,
@@ -234,35 +244,42 @@ pub fn translate_floatings(
         // }
         // average_pos/=selected_query.iter().len() as f32;
 
+        // if key.pressed(KeyCode::Space) {
+        //     editor_data.test_data = camera_transform.translation();
+        // }
+
         //let camera_translation = camera_transform.translation() + (camera_transform.forward()*10.0);
         let camera_translation = camera_transform.translation();
+        //let camera_translation = editor_data.test_data;
         let dir = Dir3::new_unchecked((hit.point-camera_translation).normalize());
         let mut dist=f32::INFINITY;
 
         let main_selected = part_query.get(selected_query.get_single().unwrap()).unwrap();
         let mut a = get_collider(main_selected.0, main_selected.1, part_registry.parts.get(&main_selected.0.id).unwrap());
-        a.translation=camera_translation;
-        gizmos.cuboid(a, Color::srgb_u8(0,0,255));
+        a.translation=camera_translation+part_registry.parts.get(&main_selected.0.id).unwrap().center;
+        gizmo.cuboid(a, Color::srgb_u8(0,0,255));
 
         let hit_base_entity_result = part_query.get(base_part_mesh_query.get(*hit_entity).unwrap().base_part).unwrap();
 
         //println!("collider main is {:?}",a);
 
         let b = get_collider(hit_base_entity_result.0, hit_base_entity_result.1, part_registry.parts.get(&hit_base_entity_result.0.id).unwrap());
-        gizmos.cuboid(b, Color::srgb_u8(0,0,255));
+        gizmo.cuboid(b, Color::srgb_u8(0,0,255));
         //gizmos.cuboid(b.with_scale(b.scale*3.0), Color::srgb_u8(0,0,255));
             //println!("collider secondary is {:?}",b);
-        dist=dist.min(to_touch(&a, &b, dir/* , &mut gizmos */));
+        dist=dist.min(to_touch(&a, &b, dir/* , &mut gizmo */));
         if dist==f32::INFINITY { return; }
-        println!("DIST IS {:?}",dist);
+        //println!("DIST IS {:?}",dist);
+        //println!("THE CENTERS ARE {:?} and {:?}",part_registry.parts.get(&main_selected.0.id).unwrap().center,part_registry.parts.get(&hit_base_entity_result.0.id).unwrap().center);
         let translation = (hit.point-camera_translation).normalize()*dist;
         
 
         //println!("TRANSOFMRMED EVERYTHING BY {:?}",translation);
         for mut selected in &mut selected_query {
             //transform.0.translation=camera_translation+translation;
+            //part_query.get_mut(selected).unwrap().2.translation=((camera_translation+translation));
             part_query.get_mut(selected).unwrap().0.position=bevy_to_unity_translation(&(camera_translation+translation));
-            println!("TRANSOFMRMED EVERYTHING TO {:?}",part_query.get(selected).unwrap().0.position);
+            //println!("TRANSOFMRMED EVERYTHING TO {:?}",part_query.get(selected).unwrap().0.position);
             // transform.0.translation.x+=translation.x;
             // transform.0.translation.y+=translation.y;
             // transform.0.translation.z+=translation.z;
@@ -468,13 +485,17 @@ fn smart_move_selected_relative_dir(
         }
 
         let dir = round_to_axis(&selected_bounding_box, &Dir3::new_unchecked(camera_query.1.rotation().mul_vec3(*vector)));
-        let mut distances = possible_positions.get(&dir).unwrap_or(&Vec::new()).clone();
-        distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let mut moved = false;
-        //println!("distances is {:?}",distances);
-        let mut best_dist = f32::MAX;
-        let mut the_dist = f32::MAX;
-        for pos in distances {
+        // let mut distances = possible_positions.get(&dir).unwrap_or(&Vec::new()).clone();
+        // distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let max_moves = multiplier as usize;
+
+        // let mut moved = 0;
+        // println!("distances is {:?}",distances);
+        // let mut best_dist = f32::MAX;
+        // let mut the_dist = f32::MAX;
+
+        let mut all_distances = Vec::new();
+        for pos in possible_positions.get(&dir).unwrap_or(&Vec::new()){
             // if pos >0.0 {
             //     gizmo.arrow(
             //         selected_bounding_box.translation,
@@ -482,19 +503,26 @@ fn smart_move_selected_relative_dir(
             //         Color::srgb_u8(0, 255, 255)
             //     );
             // }
-            for possible_pos in [(pos-(cuboid_scale(&selected_bounding_box,&dir)/2.0)),pos,pos+(cuboid_scale(&selected_bounding_box,&dir)/2.0)] {
+            for possible_pos in [(pos-(cuboid_scale(&selected_bounding_box,&dir)/2.0)),*pos,pos+(cuboid_scale(&selected_bounding_box,&dir)/2.0)] {
                 //println!("a possiblepos for {:?} is {:?}",pos,possible_pos);
                 gizmo.sphere(Isometry3d::from_translation(selected_bounding_box.translation+(possible_pos*cuboid_face_normal(&selected_bounding_box, &dir))), 0.5, Color::srgb_u8(255, 255, 0));
-                if possible_pos < best_dist && possible_pos > 0.00001 {
-                    best_dist = possible_pos; 
-                    the_dist = pos;
+                if possible_pos > 0.00001 {
+                    all_distances.push(possible_pos);
                 }
+                // if possible_pos < best_dist && possible_pos > 0.00001 {
+                //     best_dist = possible_pos; 
+                //     the_dist = pos;
+                // }
             }
         }
+        all_distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        if best_dist!=f32::MAX {
+        if !all_distances.is_empty() {
             //println!("pos is {:?} and moved is {:?}",best_dist,(best_dist*cuboid_face_normal(&selected_bounding_box, &dir)));
-            moved=true;
+            //moved=true;
+
+            let best_dist = all_distances[max_moves.min(all_distances.len()-1)];
+
             arrow(gizmo,
                 selected_bounding_box.translation-cuboid_face(&selected_bounding_box,dir).0.0,
                 (best_dist*cuboid_face_normal(&selected_bounding_box, &dir)),
