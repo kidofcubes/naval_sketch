@@ -2,6 +2,8 @@ use core::f32;
 use std::{collections::VecDeque, iter::once, ops::{Deref, DerefMut}};
 
 use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, gizmos::{gizmos, primitives::dim3::Plane3dBuilder}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec2, Vec3, Vec3A, VectorSpace}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoConfig, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Primitive3d, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::{List, Map}, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use enum_collections::{EnumMap, Enumerated};
+use rand::seq::IndexedRandom;
 use regex::Regex;
 use smol_str::SmolStr;
 
@@ -19,7 +21,8 @@ impl Plugin for EditorPlugin {
             }
         );
         
-    
+        let mut command_trees = EnumMap::new_default();
+        
         let mut command_tree = CommandTree::default();
         command_tree.add_command(b"w");
         command_tree.add_command(b"a");
@@ -38,12 +41,15 @@ impl Plugin for EditorPlugin {
         command_tree.add_command(b"f");
         command_tree.add_command(b"F");
 
+        command_trees[CommandMode::Translation]=command_tree;
+
         app.insert_resource(
             CommandData {
                 command_history: VecDeque::new(),
                 current_byte_index: 0,
                 current_command: Vec::new(),
-                commands: command_tree
+                commands: command_trees,
+                mode: CommandMode::Translation
             }
         );
         app.insert_resource(
@@ -72,11 +78,20 @@ impl Plugin for EditorPlugin {
     }
 }
 
+#[derive(Enumerated, Copy, Clone, Debug)]
+pub enum CommandMode {
+    Translation,
+    Attributes,
+    Rotation,
+    Disabled
+}
+
+
 #[derive(Resource)]
 pub struct EditorData {
     action_history: Vec<Action>,
     queued_commands: Vec<QueuedCommand>, //use deque?
-    floating: bool
+    floating: bool,
 }
 
 #[derive(Resource)]
@@ -84,7 +99,8 @@ pub struct CommandData {
     pub command_history: VecDeque<String>,
     pub current_byte_index: usize,
     pub current_command: Vec<u8>,
-    pub commands: CommandTree,
+    pub commands: EnumMap<CommandMode,CommandTree,{CommandMode::SIZE}>,
+    pub mode: CommandMode
 }
 
 pub struct CommandTree {
@@ -163,23 +179,34 @@ fn execute_queued_commands(
 ){
     let mut flip_floating = false;
     for queued_command in &editor_data.queued_commands {
-        match queued_command.command.as_str() {
-            "W" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_Z, queued_command.multiplier),
-            "A" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_X, queued_command.multiplier),
-            "S" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::Z, queued_command.multiplier),
-            "D" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::X, queued_command.multiplier),
-            "Q" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_Y, queued_command.multiplier),
-            "E" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::Y, queued_command.multiplier),
+        match command_data.mode {
+            CommandMode::Translation => match queued_command.command.as_str() {
+                "W" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_Z, queued_command.multiplier),
+                "A" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_X, queued_command.multiplier),
+                "S" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::Z, queued_command.multiplier),
+                "D" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::X, queued_command.multiplier),
+                "Q" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_Y, queued_command.multiplier),
+                "E" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::Y, queued_command.multiplier),
 
-            "w" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_Z, queued_command.multiplier),
-            "a" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_X, queued_command.multiplier),
-            "s" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::Z, queued_command.multiplier),
-            "d" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::X, queued_command.multiplier),
-            "q" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_Y, queued_command.multiplier),
-            "e" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::Y, queued_command.multiplier),
-            "F" => {flip_floating=true;}
-            _ => {}
+                "w" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_Z, queued_command.multiplier),
+                "a" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_X, queued_command.multiplier),
+                "s" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::Z, queued_command.multiplier),
+                "d" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::X, queued_command.multiplier),
+                "q" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_Y, queued_command.multiplier),
+                "e" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::Y, queued_command.multiplier),
+
+                "f" => {command_data.mode = CommandMode::Attributes}
+                "F" => {flip_floating=true;}
+                _ => {}
+            },
+            CommandMode::Attributes => match queued_command.command.as_str() {
+                _ => {}
+            },
+            CommandMode::Rotation => todo!(),
+            CommandMode::Disabled => todo!(),
         }
+
+        
 
         let mut history: String= String::new();
         if queued_command.multiplier!=1.0 {
@@ -328,7 +355,7 @@ fn command_typing(
                             }
                         }
 
-                        let is_command = command_data.commands.has_command(command_match.as_str().as_bytes());
+                        let is_command = command_data.commands[command_data.mode].has_command(command_match.as_str().as_bytes());
                         
                         if is_command.0 {
                             if is_command.1 {
@@ -369,8 +396,12 @@ fn command_typing(
             },
             //Key::ArrowUp => todo!(),
             Key::Escape => {
-                command_data.current_byte_index=0;
-                command_data.current_command.clear();
+                if command_data.current_command.is_empty() {
+                    command_data.mode = CommandMode::Translation;
+                }else{
+                    command_data.current_byte_index=0;
+                    command_data.current_command.clear();
+                }
             }
             Key::Backspace => {
                 let index = command_data.current_byte_index;

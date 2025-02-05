@@ -1,11 +1,12 @@
 use core::f32;
 use std::{iter::once, ops::DerefMut};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::BoundingVolume, Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextFont, TextLayout}, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, ColorToComponents, Luminance, Srgba}, ecs::{event::EventCursor, query::{self, Or}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::BoundingVolume, Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextFont, TextLayout}, ui::{BackgroundColor, FlexDirection, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::{mock::StepRng, SmallRng, StdRng}, Rng, SeedableRng};
 use regex::Regex;
 
-use crate::{editor::{CommandData, Selected}, editor_utils::{aabb_from_transform, cuboid_face, cuboid_face_normal, get_nearby, get_relative_nearbys, simple_closest_dist, transform_from_aabb}, parsing::{AdjustableHull, BasePart}, parts::{base_part_to_bevy_transform, get_collider, unity_to_bevy_translation, PartRegistry}};
+use crate::{editor::{CommandData, Selected}, editor_utils::{aabb_from_transform, cuboid_face, cuboid_face_normal, get_nearby, get_relative_nearbys, simple_closest_dist, transform_from_aabb}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, get_collider, unity_to_bevy_translation, PartRegistry}};
 
 
 #[derive(Resource)]
@@ -18,15 +19,23 @@ pub struct CommandDisplayData {
     pub flasher: Option<Entity>,
 }
 
+#[derive(Resource)]
+pub struct PropertiesDisplayData {
+    pub displays: EnumMap<PartAttributes,Entity,{PartAttributes::SIZE}>, 
+}
+
 /// Spawn a bit of UI text to explain how to move the player.
 pub fn spawn_ui(
     asset_server: Res<AssetServer>,
     mut font_data: ResMut<CommandDisplayData>,
+    mut properties_display_data: ResMut<PropertiesDisplayData>,
     mut commands: Commands
 ) {
     font_data.mult = 4.0;
     font_data.font_size = 13.0;
     font_data.font_width = 6.0;
+
+    //bottom command bar
     commands
         .spawn(Node {
             position_type: PositionType::Absolute,
@@ -87,6 +96,143 @@ pub fn spawn_ui(
 
         })
     ;
+
+    //right properties panel
+    let font = TextFont {
+        font: asset_server.load("/usr/share/fonts/TTF/CozetteVector.ttf"),
+        font_size: font_data.font_size*font_data.mult, 
+        ..default()
+    };
+
+
+    commands
+        .spawn((Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(12.0),
+                right: Val::Px(12.0),
+                height: Val::Px(1024.0),
+                width: Val::Px(512.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            BackgroundColor(Color::srgba_u8(64, 64, 64, 128))
+        ))
+        .with_children(|parent| {
+            for attr in PartAttributes::VARIANTS {
+                properties_display_data.displays[*attr]=attribute_editor(parent, *attr, font.clone());
+            }
+        })
+    ;
+}
+
+#[derive(Enumerated, Debug, Copy, Clone)]
+enum PartAttributes {
+    //BasePart
+    Id,
+    IgnorePhysics,
+    PositionX,
+    PositionY,
+    PositionZ,
+    RotationX,
+    RotationY,
+    RotationZ,
+    ScaleX,
+    ScaleY,
+    ScaleZ,
+    Color,
+    Armor,
+    //AdjustableHull
+    Length,
+    Height,
+    FrontWidth,
+    BackWidth,
+    FrontSpread,
+    BackSpread,
+    TopRoundness,
+    BottomRoundness,
+    HeightScale,
+    HeightOffset,
+    //Turret
+    ManualControl,
+    Elevator
+}
+impl PartAttributes {
+    fn get_field(&self, part: &Part) -> Option<String>{
+        return match self {
+            PartAttributes::Id => Some(part.base_part().id.to_string()),
+            PartAttributes::IgnorePhysics => Some(part.base_part().ignore_physics.to_string()),
+            PartAttributes::PositionX => Some(part.base_part().position.x.to_string()),
+            PartAttributes::PositionY => Some(part.base_part().position.y.to_string()),
+            PartAttributes::PositionZ => Some(part.base_part().position.z.to_string()),
+            PartAttributes::RotationX => Some(part.base_part().rotation.x.to_string()),
+            PartAttributes::RotationY => Some(part.base_part().rotation.y.to_string()),
+            PartAttributes::RotationZ => Some(part.base_part().rotation.z.to_string()),
+            PartAttributes::ScaleX => Some(part.base_part().scale.x.to_string()),
+            PartAttributes::ScaleY => Some(part.base_part().scale.y.to_string()),
+            PartAttributes::ScaleZ => Some(part.base_part().scale.z.to_string()),
+            PartAttributes::Color => Some(part.base_part().color.to_srgba().to_hex()),
+            PartAttributes::Armor => Some(part.base_part().armor.to_string()),
+
+            PartAttributes::Length => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.length.to_string())} else {None}},
+            PartAttributes::Height => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.height.to_string())} else {None}},
+            PartAttributes::FrontWidth => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.front_width.to_string())} else {None}},
+            PartAttributes::BackWidth => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.back_width.to_string())} else {None}},
+            PartAttributes::FrontSpread => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.front_spread.to_string())} else {None}},
+            PartAttributes::BackSpread => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.back_spread.to_string())} else {None}},
+            PartAttributes::TopRoundness => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.top_roundness.to_string())} else {None}},
+            PartAttributes::BottomRoundness => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.bottom_roundness.to_string())} else {None}},
+            PartAttributes::HeightScale => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.height_scale.to_string())} else {None}},
+            PartAttributes::HeightOffset => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.height_offset.to_string())} else {None}},
+
+            PartAttributes::ManualControl => {if let Part::Turret(_,turret) = part {Some(turret.manual_control.to_string())} else {None}},
+            PartAttributes::Elevator => {if let Part::Turret(_,turret) = part {Some(turret.elevator.unwrap_or(0.0).to_string())} else {None}},
+        };
+    }
+    fn set_field(&self, part: &mut Part, text: String) -> Result<(),Box<dyn std::error::Error>>{
+        match self {
+            PartAttributes::Id => {part.base_part_mut().id = text.parse()?},
+            PartAttributes::IgnorePhysics => {part.base_part_mut().id = text.parse()?},
+            PartAttributes::PositionX => {part.base_part_mut().position.x = text.parse()?},
+            PartAttributes::PositionY => {part.base_part_mut().position.y = text.parse()?},
+            PartAttributes::PositionZ => {part.base_part_mut().position.z = text.parse()?},
+            PartAttributes::RotationX => {part.base_part_mut().rotation.x = text.parse()?},
+            PartAttributes::RotationY => {part.base_part_mut().rotation.y = text.parse()?},
+            PartAttributes::RotationZ => {part.base_part_mut().rotation.z = text.parse()?},
+            PartAttributes::ScaleX => {part.base_part_mut().scale.x = text.parse()?},
+            PartAttributes::ScaleY => {part.base_part_mut().scale.y = text.parse()?},
+            PartAttributes::ScaleZ => {part.base_part_mut().scale.z = text.parse()?},
+            PartAttributes::Color => {part.base_part_mut().color = Color::Srgba(Srgba::hex(text)?)},
+            PartAttributes::Armor => {part.base_part_mut().armor = text.parse()?},
+
+            PartAttributes::Length => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.length = text.parse()?}},
+            PartAttributes::Height => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.height = text.parse()?}},
+            PartAttributes::FrontWidth => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.front_width = text.parse()?}},
+            PartAttributes::BackWidth => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.back_width = text.parse()?}},
+            PartAttributes::FrontSpread => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.front_spread = text.parse()?}},
+            PartAttributes::BackSpread => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.back_spread = text.parse()?}},
+            PartAttributes::TopRoundness => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.top_roundness = text.parse()?}},
+            PartAttributes::BottomRoundness => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.bottom_roundness = text.parse()?}},
+            PartAttributes::HeightScale => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.height_scale = text.parse()?}},
+            PartAttributes::HeightOffset => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.height_offset = text.parse()?}},
+
+            PartAttributes::ManualControl => {if let Part::Turret(_,turret) = part {turret.manual_control = text.parse()?}},
+            PartAttributes::Elevator => {if let Part::Turret(_,turret) = part {turret.elevator = Some(text.parse()?)}},
+        };
+        return Ok(());
+    }
+}
+
+
+fn attribute_editor(parent: &mut ChildBuilder, attribute: PartAttributes, font: TextFont) -> Entity{
+    return parent.spawn((
+            Node {
+                left: Val::Px(12.0),
+                position_type: PositionType::Relative,
+                ..default()
+            },
+            Text::new(format!("hi i am {:?}",attribute)),
+            font,
+    )).id();
 }
 
 // fn random_color() -> Color {
@@ -179,100 +325,6 @@ pub fn render_gizmos(
             }
         }
     }
-
-
-
-    // for selected in &selected{
-    //     let bounding_box = get_collider(selected.0, selected.1, part_registry.parts.get(&selected.0.id).unwrap());
-    //     gizmo.cuboid(
-    //         bounding_box,
-    //         Color::srgb_u8(0, 255, 0)
-    //     );
-    //     let dir_nearbys = get_relative_nearbys(&bounding_box, &other_parts, &camera_query.1.forward()/* ,&mut gizmos */);
-    //     
-    //     for nearby in dir_nearbys.0 {
-    //         //gizmo.cuboid(transform_from_aabb(&aabb_from_transform(&bounding_box)),Color::srgb_u8(255, 0, 255));
-    //         if simple_closest_dist(&bounding_box, nearby.0) > (1.0) {
-    //             continue;
-    //         }
-    //         // gizmo.cuboid(
-    //         //     *nearby.0,
-    //         //     Color::srgb_u8(0, 255, 255)
-    //         // );
-    //         // let facing_face_side1 = cuboid_face(&bounding_box, (dir_nearbys.1+1)%6);
-    //         // let facing_face_side2 = cuboid_face(&bounding_box, (dir_nearbys.1+2)%6);
-    //         
-    //         let dotted_dist = 
-    //             cuboid_face_normal(&bounding_box, &dir_nearbys.1)*
-    //             ((nearby.0.translation-bounding_box.translation).dot(cuboid_face_normal(&bounding_box, &dir_nearbys.1)));
-    //         
-    //         let face = cuboid_face(nearby.0,nearby.1);
-    //         let mut thing = Isometry3d::from_translation(face.1);
-    //         thing.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, face.0.0.normalize());
-    //         //gizmo.rect(thing,Vec2::ONE*2.0,Color::srgb_u8(0, 255, 255));
-    //         
-    //
-    //         // for i in 1..3 {
-    //         //     let facing_face_side = cuboid_face(&bounding_box, (dir_nearbys.1+i)%6);
-    //         //     for j in 0..2 {
-    //         //         let face = cuboid_face(nearby.0, (nearby.1+i+(j*3))%6);
-    //         //         let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
-    //         //         //thing.rotation = Quat::from_rotation_arc(*Dir3::NEG_Z, face.0.0.normalize());
-    //         //         //thing.rotation = nearby.0.rotation *;
-    //         //         //gizmos.rect(thing, Vec2::new(face.0.1.length(),face.0.2.length())*2.0, Color::srgb_u8(255, 255, 0));
-    //         //         
-    //         //         //gizmos.rect(thing, Vec2::new(facing_face_side1.0.1.length(),facing_face_side1.0.2.length())*2.0, Color::srgb_u8(255, 255, 0));
-    //         //         //gizmos.rect(thing, Vec2::new(facing_face_side.0.1.length(),facing_face_side.0.2.length())*2.0, Color::srgb_u8(255, 255, 0));
-    //         //         //gizmos.rect(thing, Vec2::new(face.0.1.length(),face.0.2.length())*2.0, Color::srgb_u8(255, 255, 0));
-    //         //         //gizmos.rect(thing, Vec2::new(facing_face_side.0.1.length(),facing_face_side.0.2.length())*2.0, Color::srgb_u8(255, 255, 0));
-    //         //
-    //         //         
-    //         //         let color = random_color(((nearby.1+i+(j*3))%6).into());
-    //         //
-    //         //         //gizmos.arrow(bounding_box.translation, bounding_box.translation+cuboid_face_normal(&bounding_box, &((dir_nearbys.1+i+(j*3))%6)), color);
-    //         //         //gizmos.arrow(bounding_box.translation+Vec3::Y, bounding_box.translation+face.0.0.normalize(), color);
-    //         //         
-    //         //     }
-    //         // }
-    //
-    //         
-    //         
-    //     }
-    //
-    //     
-    //     // for pair in nearbys.iter() {
-    //     //     let actual_side = Dir3::new_unchecked(
-    //     //         bounding_box.rotation.mul_vec3(dir_from_index(pair.0))
-    //     //     );
-    //     //     let color = match(pair.0){
-    //     //         0 => Color::srgb_u8(255, 255, 0),
-    //     //         1 => Color::srgb_u8(255, 0, 255),
-    //     //         2 => Color::srgb_u8(0, 255, 255),
-    //     //         3 => Color::srgb_u8(255, 0, 0),
-    //     //         4 => Color::srgb_u8(0, 255, 0),
-    //     //         5 => Color::srgb_u8(0, 0, 255),
-    //     //         _ => {panic!("wtfrick")}
-    //     //     };
-    //     //
-    //     //     for nearby in pair.1 {
-    //     //         gizmos.cuboid(
-    //     //             **nearby,
-    //     //             color
-    //     //         );
-    //     //     }
-    //     //
-    //     //     // gizmos.cuboid(
-    //     //     //     *nearby,
-    //     //     //     Color::srgb_u8(255, 0, 255)
-    //     //     // );
-    //     // }
-    //     // let forward_face = cuboid_face(&bounding_box, 0);
-    //     // gizmos.rect(
-    //     //     Isometry3d::new(forward_face.1, bounding_box.rotation),
-    //     //     Vec2::new(forward_face.0.1.length()*2.0,forward_face.0.2.length()*2.0),
-    //     //     Color::srgb_u8(255, 0, 0)
-    //     // );
-    // }
 }
 
 
@@ -398,17 +450,46 @@ pub fn update_selected(
 }
 
 pub fn on_part_changed(
-    mut changed_base_part: Query<(&mut Transform, Ref<BasePart>), Changed<BasePart>>,
+    mut changed_base_part: Query<(&mut Transform, Entity, Ref<BasePart>, Option<Ref<AdjustableHull>>, Option<Ref<Turret>>), Or<(Changed<BasePart>,Changed<AdjustableHull>,Changed<Turret>)>>,
+    selected: Query<Entity, With<Selected>>,
+    text_query: Query<&Text>,
+    display_properties: Res<PropertiesDisplayData>
 ){
+
+    let selected_properties = EnumMap::new_default();
+    for attr in PartAttributes::VARIANTS {
+        selected_properties[*attr] = Vec::new();
+    }
+
     for mut pair in &mut changed_base_part {
         println!("THE THING CHANGED OH MAI GAH {:?}",pair);
         let new_transform =
-            base_part_to_bevy_transform(&pair.1);
+            base_part_to_bevy_transform(&pair.2);
         pair.0.translation = new_transform.translation;
         pair.0.rotation = new_transform.rotation;
         pair.0.scale = new_transform.scale;
+
+        if selected.contains(pair.1) {
+            for attr in PartAttributes::VARIANTS {
+                selected_properties[*attr].push(attr.get_field());
+            }
+        }
     }
 }
+
+
+fn recompute_display_text(values: &Vec<String>) -> String {
+    let orig = values.first().unwrap();
+    for check in values {
+        if orig!=check {
+            return "XXX".to_owned();
+        }
+    }
+    return orig;
+}
+
+
+
 
 pub fn update_command_text(
     command_data: Res<CommandData>,
