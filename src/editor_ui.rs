@@ -1,12 +1,63 @@
 use core::f32;
-use std::{iter::once, ops::DerefMut};
+use std::{fmt::Display, iter::once, ops::{Deref, DerefMut}};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, ColorToComponents, Luminance, Srgba}, ecs::{event::EventCursor, query::{self, Or}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::BoundingVolume, Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextFont, TextLayout}, ui::{BackgroundColor, FlexDirection, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, ColorToComponents, Luminance, Srgba}, ecs::{event::EventCursor, query::{self, Or}, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::BoundingVolume, Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextFont, TextLayout}, ui::{BackgroundColor, FlexDirection, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::{mock::StepRng, SmallRng, StdRng}, Rng, SeedableRng};
 use regex::Regex;
 
 use crate::{editor::{CommandData, Selected}, editor_utils::{aabb_from_transform, cuboid_face, cuboid_face_normal, get_nearby, get_relative_nearbys, simple_closest_dist, transform_from_aabb}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, get_collider, unity_to_bevy_translation, PartRegistry}};
+
+pub struct EditorUiPlugin;
+
+impl Plugin for EditorUiPlugin {
+    fn build(&self, app: &mut bevy::app::App) {
+        app.insert_resource(
+            PropertiesDisplayData {
+                displays: EnumMap::new_option()
+            }
+        );
+
+        app.add_observer(on_hover);
+        app.add_observer(on_unhover);
+        app.add_observer(on_click);
+        app.add_observer(
+            |
+                trigger: Trigger<OnAdd, Selected>,
+                parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>), With<Selected>>,
+                mut text_query: Query<&mut Text>,
+                display_properties: Res<PropertiesDisplayData>
+            | {
+                let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().collect();
+                update_display_text(&selected_parts, &mut text_query, &display_properties);
+            }
+        );
+        app.add_observer(
+            |
+                trigger: Trigger<OnRemove, Selected>,
+                parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>, Entity), With<Selected>>,
+                mut text_query: Query<&mut Text>,
+                display_properties: Res<PropertiesDisplayData>
+            | {
+                let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().filter_map(|part| {
+                    if part.3 == trigger.entity() { None } else { Some((part.0,part.1,part.2)) }
+                }).collect();
+                update_display_text(&selected_parts, &mut text_query, &display_properties);
+            }
+        );
+        app.add_systems(Startup, (spawn_ui));
+        app.insert_resource(
+            CommandDisplayData {
+                mult: -1.0,
+                font_size: -1.0,
+                font_width: -1.0,
+                input_text_display: None,
+                flasher: None,
+                history_text_display: None,
+            }
+        );
+    }
+}
 
 
 #[derive(Resource)]
@@ -21,7 +72,7 @@ pub struct CommandDisplayData {
 
 #[derive(Resource)]
 pub struct PropertiesDisplayData {
-    pub displays: EnumMap<PartAttributes,Entity,{PartAttributes::SIZE}>, 
+    pub displays: EnumMap<PartAttributes,Option<Entity>,{PartAttributes::SIZE}>, 
 }
 
 /// Spawn a bit of UI text to explain how to move the player.
@@ -110,8 +161,8 @@ pub fn spawn_ui(
                 position_type: PositionType::Absolute,
                 top: Val::Px(12.0),
                 right: Val::Px(12.0),
-                height: Val::Px(1024.0),
-                width: Val::Px(512.0),
+                height: Val::Auto,
+                width: Val::Px(768.0),
                 flex_direction: FlexDirection::Column,
                 ..default()
             },
@@ -119,14 +170,14 @@ pub fn spawn_ui(
         ))
         .with_children(|parent| {
             for attr in PartAttributes::VARIANTS {
-                properties_display_data.displays[*attr]=attribute_editor(parent, *attr, font.clone());
+                properties_display_data.displays[*attr]=Some(attribute_editor(parent, *attr, font.clone()));
             }
         })
     ;
 }
 
 #[derive(Enumerated, Debug, Copy, Clone)]
-enum PartAttributes {
+pub enum PartAttributes {
     //BasePart
     Id,
     IgnorePhysics,
@@ -157,67 +208,99 @@ enum PartAttributes {
     Elevator
 }
 impl PartAttributes {
-    fn get_field(&self, part: &Part) -> Option<String>{
-        return match self {
-            PartAttributes::Id => Some(part.base_part().id.to_string()),
-            PartAttributes::IgnorePhysics => Some(part.base_part().ignore_physics.to_string()),
-            PartAttributes::PositionX => Some(part.base_part().position.x.to_string()),
-            PartAttributes::PositionY => Some(part.base_part().position.y.to_string()),
-            PartAttributes::PositionZ => Some(part.base_part().position.z.to_string()),
-            PartAttributes::RotationX => Some(part.base_part().rotation.x.to_string()),
-            PartAttributes::RotationY => Some(part.base_part().rotation.y.to_string()),
-            PartAttributes::RotationZ => Some(part.base_part().rotation.z.to_string()),
-            PartAttributes::ScaleX => Some(part.base_part().scale.x.to_string()),
-            PartAttributes::ScaleY => Some(part.base_part().scale.y.to_string()),
-            PartAttributes::ScaleZ => Some(part.base_part().scale.z.to_string()),
-            PartAttributes::Color => Some(part.base_part().color.to_srgba().to_hex()),
-            PartAttributes::Armor => Some(part.base_part().armor.to_string()),
+    fn get_field(&self, base_part: &BasePart, adjustable_hull: Option<&AdjustableHull>, turret: Option<&Turret>) -> Option<String>{
+        let mut string: Option<String> = None;
 
-            PartAttributes::Length => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.length.to_string())} else {None}},
-            PartAttributes::Height => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.height.to_string())} else {None}},
-            PartAttributes::FrontWidth => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.front_width.to_string())} else {None}},
-            PartAttributes::BackWidth => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.back_width.to_string())} else {None}},
-            PartAttributes::FrontSpread => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.front_spread.to_string())} else {None}},
-            PartAttributes::BackSpread => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.back_spread.to_string())} else {None}},
-            PartAttributes::TopRoundness => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.top_roundness.to_string())} else {None}},
-            PartAttributes::BottomRoundness => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.bottom_roundness.to_string())} else {None}},
-            PartAttributes::HeightScale => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.height_scale.to_string())} else {None}},
-            PartAttributes::HeightOffset => {if let Part::AdjustableHull(_,adjustable_hull) = part {Some(adjustable_hull.height_offset.to_string())} else {None}},
-
-            PartAttributes::ManualControl => {if let Part::Turret(_,turret) = part {Some(turret.manual_control.to_string())} else {None}},
-            PartAttributes::Elevator => {if let Part::Turret(_,turret) = part {Some(turret.elevator.unwrap_or(0.0).to_string())} else {None}},
+        string = match self {
+            PartAttributes::Id => Some(base_part.id.to_string()),
+            PartAttributes::IgnorePhysics => Some(base_part.ignore_physics.to_string()),
+            PartAttributes::PositionX => Some(base_part.position.x.to_string()),
+            PartAttributes::PositionY => Some(base_part.position.y.to_string()),
+            PartAttributes::PositionZ => Some(base_part.position.z.to_string()),
+            PartAttributes::RotationX => Some(base_part.rotation.x.to_string()),
+            PartAttributes::RotationY => Some(base_part.rotation.y.to_string()),
+            PartAttributes::RotationZ => Some(base_part.rotation.z.to_string()),
+            PartAttributes::ScaleX => Some(base_part.scale.x.to_string()),
+            PartAttributes::ScaleY => Some(base_part.scale.y.to_string()),
+            PartAttributes::ScaleZ => Some(base_part.scale.z.to_string()),
+            PartAttributes::Color => Some(base_part.color.to_srgba().to_hex()),
+            PartAttributes::Armor => Some(base_part.armor.to_string()),
+            _ => None
         };
+        if string.is_some() { return string };
+
+
+        if let Some(adjustable_hull) = adjustable_hull {
+            string = match self {
+                PartAttributes::Length => Some(adjustable_hull.length.to_string()),
+                PartAttributes::Height => Some(adjustable_hull.height.to_string()),
+                PartAttributes::FrontWidth => Some(adjustable_hull.front_width.to_string()),
+                PartAttributes::BackWidth => Some(adjustable_hull.back_width.to_string()),
+                PartAttributes::FrontSpread => Some(adjustable_hull.front_spread.to_string()),
+                PartAttributes::BackSpread => Some(adjustable_hull.back_spread.to_string()),
+                PartAttributes::TopRoundness => Some(adjustable_hull.top_roundness.to_string()),
+                PartAttributes::BottomRoundness => Some(adjustable_hull.bottom_roundness.to_string()),
+                PartAttributes::HeightScale => Some(adjustable_hull.height_scale.to_string()),
+                PartAttributes::HeightOffset => Some(adjustable_hull.height_offset.to_string()),
+                _ => None
+            };
+            if string.is_some() { return string };
+        }
+
+
+        if let Some(turret) = turret {
+            string = match self {
+                PartAttributes::ManualControl=> Some(turret.manual_control.to_string()),
+                PartAttributes::Elevator => Some(turret.elevator.unwrap_or(0.0).to_string()),
+                _ => None
+            };
+            if string.is_some() { return string };
+        }
+
+        return string;
     }
-    fn set_field(&self, part: &mut Part, text: String) -> Result<(),Box<dyn std::error::Error>>{
+    fn set_field(&self, base_part: &mut BasePart, adjustable_hull: Option<&mut AdjustableHull>, turret: Option<&mut Turret>, text: &str) -> Result<(),Box<dyn std::error::Error>>{
         match self {
-            PartAttributes::Id => {part.base_part_mut().id = text.parse()?},
-            PartAttributes::IgnorePhysics => {part.base_part_mut().id = text.parse()?},
-            PartAttributes::PositionX => {part.base_part_mut().position.x = text.parse()?},
-            PartAttributes::PositionY => {part.base_part_mut().position.y = text.parse()?},
-            PartAttributes::PositionZ => {part.base_part_mut().position.z = text.parse()?},
-            PartAttributes::RotationX => {part.base_part_mut().rotation.x = text.parse()?},
-            PartAttributes::RotationY => {part.base_part_mut().rotation.y = text.parse()?},
-            PartAttributes::RotationZ => {part.base_part_mut().rotation.z = text.parse()?},
-            PartAttributes::ScaleX => {part.base_part_mut().scale.x = text.parse()?},
-            PartAttributes::ScaleY => {part.base_part_mut().scale.y = text.parse()?},
-            PartAttributes::ScaleZ => {part.base_part_mut().scale.z = text.parse()?},
-            PartAttributes::Color => {part.base_part_mut().color = Color::Srgba(Srgba::hex(text)?)},
-            PartAttributes::Armor => {part.base_part_mut().armor = text.parse()?},
+            PartAttributes::Id => {base_part.id = text.parse()?},
+            PartAttributes::IgnorePhysics => {base_part.id = text.parse()?},
+            PartAttributes::PositionX => {base_part.position.x = text.parse()?},
+            PartAttributes::PositionY => {base_part.position.y = text.parse()?},
+            PartAttributes::PositionZ => {base_part.position.z = text.parse()?},
+            PartAttributes::RotationX => {base_part.rotation.x = text.parse()?},
+            PartAttributes::RotationY => {base_part.rotation.y = text.parse()?},
+            PartAttributes::RotationZ => {base_part.rotation.z = text.parse()?},
+            PartAttributes::ScaleX => {base_part.scale.x = text.parse()?},
+            PartAttributes::ScaleY => {base_part.scale.y = text.parse()?},
+            PartAttributes::ScaleZ => {base_part.scale.z = text.parse()?},
+            PartAttributes::Color => {base_part.color = Color::Srgba(Srgba::hex(text)?)},
+            PartAttributes::Armor => {base_part.armor = text.parse()?},
+            _ => {}
+        }
 
-            PartAttributes::Length => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.length = text.parse()?}},
-            PartAttributes::Height => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.height = text.parse()?}},
-            PartAttributes::FrontWidth => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.front_width = text.parse()?}},
-            PartAttributes::BackWidth => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.back_width = text.parse()?}},
-            PartAttributes::FrontSpread => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.front_spread = text.parse()?}},
-            PartAttributes::BackSpread => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.back_spread = text.parse()?}},
-            PartAttributes::TopRoundness => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.top_roundness = text.parse()?}},
-            PartAttributes::BottomRoundness => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.bottom_roundness = text.parse()?}},
-            PartAttributes::HeightScale => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.height_scale = text.parse()?}},
-            PartAttributes::HeightOffset => {if let Part::AdjustableHull(_,adjustable_hull) = part {adjustable_hull.height_offset = text.parse()?}},
+        if let Some(adjustable_hull) = adjustable_hull {
+            match self {
+                PartAttributes::Length => adjustable_hull.length = text.parse()?,
+                PartAttributes::Height => adjustable_hull.height = text.parse()?,
+                PartAttributes::FrontWidth => adjustable_hull.front_width = text.parse()?,
+                PartAttributes::BackWidth => adjustable_hull.back_width = text.parse()?,
+                PartAttributes::FrontSpread => adjustable_hull.front_spread = text.parse()?,
+                PartAttributes::BackSpread => adjustable_hull.back_spread = text.parse()?,
+                PartAttributes::TopRoundness => adjustable_hull.top_roundness = text.parse()?,
+                PartAttributes::BottomRoundness => adjustable_hull.bottom_roundness = text.parse()?,
+                PartAttributes::HeightScale => adjustable_hull.height_scale = text.parse()?,
+                PartAttributes::HeightOffset => adjustable_hull.height_offset = text.parse()?,
+                _ => {}
+            };
+        }
 
-            PartAttributes::ManualControl => {if let Part::Turret(_,turret) = part {turret.manual_control = text.parse()?}},
-            PartAttributes::Elevator => {if let Part::Turret(_,turret) = part {turret.elevator = Some(text.parse()?)}},
+        if let Some(turret) = turret{
+            match self {
+                PartAttributes::ManualControl => turret.manual_control = text.parse()?,
+                PartAttributes::Elevator => turret.elevator = Some(text.parse()?),
+                _ => {}
+            }
         };
+
         return Ok(());
     }
 }
@@ -230,7 +313,7 @@ fn attribute_editor(parent: &mut ChildBuilder, attribute: PartAttributes, font: 
                 position_type: PositionType::Relative,
                 ..default()
             },
-            Text::new(format!("hi i am {:?}",attribute)),
+            Text::new(format!("{:?}: ???",attribute)),
             font,
     )).id();
 }
@@ -450,42 +533,73 @@ pub fn update_selected(
 }
 
 pub fn on_part_changed(
-    mut changed_base_part: Query<(&mut Transform, Entity, Ref<BasePart>, Option<Ref<AdjustableHull>>, Option<Ref<Turret>>), Or<(Changed<BasePart>,Changed<AdjustableHull>,Changed<Turret>)>>,
+    mut changed_base_part: Query<(&mut Transform, Entity), Or<(Changed<BasePart>,Changed<AdjustableHull>,Changed<Turret>)>>,
+    //parts: Query<(Ref<BasePart>, Option<Ref<AdjustableHull>>, Option<Ref<Turret>>)>,
+    parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)>,
     selected: Query<Entity, With<Selected>>,
-    text_query: Query<&Text>,
+    mut text_query: Query<&mut Text>,
     display_properties: Res<PropertiesDisplayData>
 ){
+    let mut has_changed = false;
+    for mut pair in &mut changed_base_part {
+        println!("THE THING CHANGED OH MAI GAH {:?}",pair);
+        let new_transform =
+            base_part_to_bevy_transform(&parts.get(pair.1).unwrap().0);
+        pair.0.translation = new_transform.translation;
+        pair.0.rotation = new_transform.rotation;
+        pair.0.scale = new_transform.scale;
+        has_changed = true;
+    }
+    if !has_changed {return;}
 
-    let selected_properties = EnumMap::new_default();
+    let mut selected_parts = Vec::with_capacity(selected.iter().len());
+    for selected_part in &selected {
+        selected_parts.push(parts.get(selected_part).unwrap());
+    }
+
+    update_display_text(&selected_parts, &mut text_query, &display_properties);
+}
+
+
+pub fn update_display_text(
+    parts: &[(&BasePart, Option<&AdjustableHull>, Option<&Turret>)],
+    text_query: &mut Query<&mut Text>,
+    display_properties: &Res<PropertiesDisplayData>
+){
+
+    let mut selected_properties: EnumMap<PartAttributes,Vec<String>,{PartAttributes::SIZE}> = EnumMap::new_default();
     for attr in PartAttributes::VARIANTS {
         selected_properties[*attr] = Vec::new();
     }
 
-    for mut pair in &mut changed_base_part {
-        println!("THE THING CHANGED OH MAI GAH {:?}",pair);
-        let new_transform =
-            base_part_to_bevy_transform(&pair.2);
-        pair.0.translation = new_transform.translation;
-        pair.0.rotation = new_transform.rotation;
-        pair.0.scale = new_transform.scale;
-
-        if selected.contains(pair.1) {
-            for attr in PartAttributes::VARIANTS {
-                selected_properties[*attr].push(attr.get_field());
+    for part in parts {
+        for attr in PartAttributes::VARIANTS {
+            if let Some(string) = attr.get_field(part.0, part.1, part.2) {
+                selected_properties[*attr].push(string);
             }
         }
     }
+
+    for attr in PartAttributes::VARIANTS {
+        //if !selected_properties[*attr].is_empty() {
+        text_query.get_mut(display_properties.displays[*attr].unwrap()).unwrap().0 = format!("{:?}: {}",attr,recompute_display_text(&selected_properties[*attr]));
+        //}
+    }
+
+
 }
 
 
+
 fn recompute_display_text(values: &Vec<String>) -> String {
+    if values.is_empty() { return "???".to_owned(); }
     let orig = values.first().unwrap();
     for check in values {
         if orig!=check {
             return "XXX".to_owned();
         }
     }
-    return orig;
+    return orig.to_owned();
 }
 
 

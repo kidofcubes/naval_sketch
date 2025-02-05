@@ -7,12 +7,13 @@ use rand::seq::IndexedRandom;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, Hovered}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, get_relative_nearbys, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, get_relative_nearbys, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
 
 pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
+        app.add_plugins(EditorUiPlugin);
         app.insert_resource(
             EditorData {
                 action_history: Vec::new(),
@@ -52,20 +53,7 @@ impl Plugin for EditorPlugin {
                 mode: CommandMode::Translation
             }
         );
-        app.insert_resource(
-            CommandDisplayData {
-                mult: -1.0,
-                font_size: -1.0,
-                font_width: -1.0,
-                input_text_display: None,
-                flasher: None,
-                history_text_display: None,
-            }
-        );
-        app.add_observer(on_hover);
-        app.add_observer(on_unhover);
-        app.add_observer(on_click);
-        app.add_systems(Startup, (spawn_ui));
+        
         app.add_systems(Update, (
                 translate_floatings,
                 update_selected,
