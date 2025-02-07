@@ -1,13 +1,13 @@
 use core::f32;
 use std::{collections::VecDeque, iter::once, ops::{Deref, DerefMut}};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, gizmos::{gizmos, primitives::dim3::Plane3dBuilder}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec2, Vec3, Vec3A, VectorSpace}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoConfig, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Primitive3d, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::{List, Map}, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::{Event, EventCursor, EventReader, EventWriter}, query, system::SystemState, world::World}, gizmos::{gizmos, primitives::dim3::Plane3dBuilder}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec2, Vec3, Vec3A, VectorSpace}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoConfig, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Primitive3d, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::{List, Map}, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
 use enum_collections::{EnumMap, Enumerated};
 use rand::seq::IndexedRandom;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, get_relative_nearbys, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{editor_actions::EditorActionEvent, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, get_relative_nearbys, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
 
 pub struct EditorPlugin;
 
@@ -67,6 +67,7 @@ impl Plugin for EditorPlugin {
                 mode: CommandMode::Translation
             }
         );
+        crate::editor_actions::add_actions(app);
         
         app.add_systems(Update, (
                 translate_floatings,
@@ -77,6 +78,7 @@ impl Plugin for EditorPlugin {
                 execute_queued_commands,
                 render_gizmos,
         ));
+
     }
 }
 
@@ -162,53 +164,61 @@ struct QueuedCommand {
 // }
 
 
-#[derive(Component, Debug, Copy, Clone)]
-#[require(BasePart)]
-struct EditorPart {
-}
-
-
 
 fn execute_queued_commands(
-    mut editor_data: ResMut<EditorData>,
-    mut command_data: ResMut<CommandData>,
-    camera_query: Single<(&Camera, &GlobalTransform)>,
-    mut selected: Query<Entity, With<Selected>>,
-    mut all_parts: Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
-    part_registry: Res<PartRegistry>,
-    mut display_properties: ResMut<PropertiesDisplayData>,
-    mut gizmo: Gizmos,
-    key: Res<ButtonInput<KeyCode>>,
+    // mut editor_data: ResMut<EditorData>,
+    // mut command_data: ResMut<CommandData>,
+    // camera_query: Single<(&Camera, &GlobalTransform)>,
+    // mut selected: Query<Entity, With<Selected>>,
+    // mut all_parts: Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
+    // part_registry: Res<PartRegistry>,
+    // mut display_properties: ResMut<PropertiesDisplayData>,
+    // mut editor_command_writer: EventWriter<EditorCommandEvent>,
+    // mut gizmo: Gizmos,
+    world: &mut World,
+    //key: Res<ButtonInput<KeyCode>>,
 ){
+    let mut system_state: SystemState<(
+        ResMut<EditorData>,
+        ResMut<CommandData>,
+    )> = SystemState::new(world);
+
+    let (mut editor_data,mut command_data) = system_state.get_mut(world);
+
+
     let mut flip_floating = false;
+    let mut editor_commands: Vec<EditorActionEvent> = Vec::new();
     for queued_command in &editor_data.queued_commands {
         match command_data.mode {
             CommandMode::Translation => match queued_command.command.as_str() {
-                "W" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_Z, queued_command.multiplier),
-                "A" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_X, queued_command.multiplier),
-                "S" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::Z, queued_command.multiplier),
-                "D" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::X, queued_command.multiplier),
-                "Q" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::NEG_Y, queued_command.multiplier),
-                "E" => move_selected_relative_dir(&mut selected, &mut all_parts, &camera_query, &Dir3::Y, queued_command.multiplier),
+                "W" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::NEG_Z, mult: queued_command.multiplier });},
+                "A" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::NEG_X, mult: queued_command.multiplier });},
+                "S" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::Z, mult: queued_command.multiplier });},
+                "D" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::X, mult: queued_command.multiplier });},
+                "Q" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::NEG_Y, mult: queued_command.multiplier });},
+                "E" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::Y, mult: queued_command.multiplier });},
+                //"W" => {editor_command_writer.send(EditorCommandEvent::MoveRelativeDir { vector: *Dir3::NEG_Z, mult: queued_command.multiplier });},
 
-                "w" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_Z, queued_command.multiplier),
-                "a" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_X, queued_command.multiplier),
-                "s" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::Z, queued_command.multiplier),
-                "d" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::X, queued_command.multiplier),
-                "q" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::NEG_Y, queued_command.multiplier),
-                "e" => smart_move_selected_relative_dir(&mut selected, &camera_query, &mut all_parts, &part_registry, &mut gizmo, &Dir3::Y, queued_command.multiplier),
+
+
+                "w" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_Z, mult: queued_command.multiplier });},
+                "a" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_X, mult: queued_command.multiplier });},
+                "s" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::Z, mult: queued_command.multiplier });},
+                "d" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::X, mult: queued_command.multiplier });},
+                "q" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_Y, mult: queued_command.multiplier });},
+                "e" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::Y, mult: queued_command.multiplier });},
 
                 "f" => {command_data.mode = CommandMode::Attributes}
                 "F" => {flip_floating=true;}
                 _ => {}
             },
             CommandMode::Attributes => match queued_command.command.as_str() {
-                "a" => switch_selected_attribute(&mut display_properties, -1,false),
-                "d" => switch_selected_attribute(&mut display_properties, 1 ,false),
-                "q" => switch_selected_attribute(&mut display_properties, -5,false),
-                "e" => switch_selected_attribute(&mut display_properties, 5 ,false),
+                "a" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:-1,do_loop:false});},
+                "d" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:1 ,do_loop:false});},
+                "q" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:-5,do_loop:false});},
+                "e" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:5 ,do_loop:false});},
 
-                //"f" => modify_selected_attribute(display_properties, selected_parts, attribute, value),
+                "f" => {editor_commands.push(EditorActionEvent::SetSelectedAttribute {value: queued_command.multiplier});},
                 _ => {}
             },
             CommandMode::Rotation => todo!(),
@@ -229,6 +239,10 @@ fn execute_queued_commands(
 
     if flip_floating {
         editor_data.floating=!editor_data.floating;
+    }
+
+    for command in editor_commands {
+        world.trigger(command);
     }
 }
 
@@ -351,7 +365,7 @@ fn command_typing(
 
                 let string = String::from_utf8(command_data.current_command.clone()).unwrap();
 
-                let regex: Regex = Regex::new(r"^(\d+(\.\d*)?)?([a-zA-Z]+)?$").unwrap();
+                let regex: Regex = Regex::new(r"^(\d*(\.\d*)?)?([a-zA-Z]+)?$").unwrap();
                 if regex.is_match(&string) {
                     let captures = regex.captures(&string).unwrap();
                     let num = captures.get(1);
@@ -427,206 +441,6 @@ fn command_typing(
             },
             _ => {},
         }
-    }
-}
-
-
-fn modify_selected_attribute(
-    display_properties: &mut ResMut<PropertiesDisplayData>,
-    mut selected_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>, Option<&mut Turret>), With<Selected>>,
-    attribute: PartAttributes,
-    value: f32
-){
-    if attribute.is_number() {
-        for mut selected_part in &mut selected_parts {
-            attribute.set_field(&mut selected_part.0, selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value.to_string());
-        }
-    }
-}
-
-
-fn switch_selected_attribute(
-    display_properties: &mut ResMut<PropertiesDisplayData>,
-    offset: i32,
-    do_loop: bool
-){
-    let variants: Vec<&PartAttributes> = PartAttributes::VARIANTS.iter().collect();
-    let mut position = variants.iter().position(|&a| *a == display_properties.selected).unwrap();
-    if do_loop {
-        position=(((position as i32+offset) as i32).rem_euclid(variants.len() as i32)) as usize;
-    }else{
-        position = ((position as i32+offset).clamp(0,variants.len() as i32-1)) as usize;
-    }
-    display_properties.selected = *variants[position];
-
-
-    //display_properties.selected
-}
-
-
-
-
-
-fn move_selected_relative_dir(
-    mut selected: &mut Query<Entity, With<Selected>>,
-    mut all_parts: &mut Query<(&mut BasePart, Option<&mut AdjustableHull>)>,
-    camera_transform: &Single<(&Camera, &GlobalTransform)>,
-    vector: &Vec3,
-    multiplier: f32
-){
-    
-    let mut rot = camera_transform.1.rotation().to_euler(EulerRot::XYZ);
-
-    rot.0 = (rot.0/f32::consts::FRAC_PI_2).round()*f32::consts::FRAC_PI_2;
-    rot.1 = (rot.1/f32::consts::FRAC_PI_2).round()*f32::consts::FRAC_PI_2;
-    rot.2 = (rot.2/f32::consts::FRAC_PI_2).round()*f32::consts::FRAC_PI_2;
-
-    let translation = unity_to_bevy_translation(
-        &Quat::from_euler(EulerRot::XYZ, rot.0, rot.1, rot.2).mul_vec3(*vector)
-    ) * multiplier;
-
-    for mut selected_part in selected {
-        all_parts.get_mut(selected_part).unwrap().0.position+=translation;
-    }
-}
-
-fn smart_move_selected_relative_dir(
-    mut selected: &mut Query<Entity, With<Selected>>,
-    //camera_transform: &Query<&Transform, With<Camera3d>>,
-    camera_query: &Single<(&Camera, &GlobalTransform)>,
-    all_parts: &mut Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
-    part_registry: &Res<PartRegistry>,
-    gizmo: &mut Gizmos,
-    vector: &Vec3,
-    multiplier: f32
-){
-
-    let mut other_parts = Vec::new();
-    for part in all_parts.iter() {
-        other_parts.push(get_collider(part.0.deref(), part.1.as_deref(), part_registry.parts.get(&part.0.id).unwrap()))
-    }
-
-    for selected_entity in selected {
-
-        let mut selected = all_parts.get_mut(selected_entity).unwrap();
-
-        let selected_bounding_box = get_collider(selected.0.deref(), selected.1.as_deref(), part_registry.parts.get(&selected.0.id).unwrap());
-
-        let dir_nearbys = get_nearby(&selected_bounding_box, &other_parts,false,false /* ,&mut gizmos */);
-
-        let mut possible_positions: HashMap<u8,Vec<f32>> = HashMap::new();
-        for i in 0..6 as u8 {
-            let selected_shared_face = cuboid_face(&selected_bounding_box,i);
-
-
-            for nearby in dir_nearbys.get(&i).unwrap() {
-
-                if simple_closest_dist(&selected_bounding_box, nearby.0) > (1.0) {
-                    continue;
-                }
-                //gizmo.cuboid(*nearby.0,Color::srgb_u8(0, 255, 255));
-
-                let face = cuboid_face(nearby.0, nearby.1);
-                let mut dotted_dist = (face.1-selected_shared_face.1);
-
-                possible_positions.try_insert(i, Vec::new());
-                possible_positions.get_mut(&i).unwrap().push((face.1-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()));
-                possible_positions.get_mut(&i).unwrap().push((nearby.0.translation-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()));
-
-                possible_positions.try_insert((i+3)%6, Vec::new());
-                possible_positions.get_mut(&((i+3)%6)).unwrap().push(((face.1-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()))*-1.0);
-                possible_positions.get_mut(&((i+3)%6)).unwrap().push(((nearby.0.translation-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()))*-1.0);
-
-
-                // println!("the diff is {:?}",((face.1-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize())));
-                // println!("for {:?}-{:?} is {:?} and then dot {:?}",face.1,selected_bounding_box.translation,(face.1-selected_bounding_box.translation),selected_shared_face.0.0.normalize());
-                dotted_dist = dotted_dist - (dotted_dist.dot(selected_shared_face.0.0.normalize())*selected_shared_face.0.0.normalize());
-                
-                    
-                // cuboid_face_normal(&selected_bounding_box, &i)*
-                // ((nearby.0.translation-selected_bounding_box.translation).dot(cuboid_face_normal(&selected_bounding_box, &i)));
-
-                let face = cuboid_face(nearby.0, (nearby.1+(0*3))%6);
-                //let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
-                let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
-                thing.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, face.0.0.normalize());
-
-                //gizmo.rect(thing, Vec2::ONE*5.0, Color::srgb_u8(255, 255, 0));
-
-
-            }
-        }
-
-        let dir = round_to_axis(&selected_bounding_box, &Dir3::new_unchecked(camera_query.1.rotation().mul_vec3(*vector)));
-        // let mut distances = possible_positions.get(&dir).unwrap_or(&Vec::new()).clone();
-        // distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let max_moves = multiplier as usize;
-
-        // let mut moved = 0;
-        // println!("distances is {:?}",distances);
-        // let mut best_dist = f32::MAX;
-        // let mut the_dist = f32::MAX;
-
-        let mut all_distances = Vec::new();
-        for pos in possible_positions.get(&dir).unwrap_or(&Vec::new()){
-            // if pos >0.0 {
-            //     gizmo.arrow(
-            //         selected_bounding_box.translation,
-            //         selected_bounding_box.translation+(pos*cuboid_face_normal(&selected_bounding_box, &dir)),
-            //         Color::srgb_u8(0, 255, 255)
-            //     );
-            // }
-            for possible_pos in [(pos-(cuboid_scale(&selected_bounding_box,&dir)/2.0)),*pos,pos+(cuboid_scale(&selected_bounding_box,&dir)/2.0)] {
-                //println!("a possiblepos for {:?} is {:?}",pos,possible_pos);
-                gizmo.sphere(Isometry3d::from_translation(selected_bounding_box.translation+(possible_pos*cuboid_face_normal(&selected_bounding_box, &dir))), 0.5, Color::srgb_u8(255, 255, 0));
-                if possible_pos > 0.00001 {
-                    all_distances.push(possible_pos);
-                }
-                // if possible_pos < best_dist && possible_pos > 0.00001 {
-                //     best_dist = possible_pos; 
-                //     the_dist = pos;
-                // }
-            }
-        }
-        all_distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-        if !all_distances.is_empty() {
-            //println!("pos is {:?} and moved is {:?}",best_dist,(best_dist*cuboid_face_normal(&selected_bounding_box, &dir)));
-            //moved=true;
-
-            let best_dist = all_distances[max_moves.min(all_distances.len()-1)];
-
-            arrow(gizmo,
-                selected_bounding_box.translation-cuboid_face(&selected_bounding_box,dir).0.0,
-                (best_dist*cuboid_face_normal(&selected_bounding_box, &dir)),
-                Color::srgb_u8(0, 255, 255)
-            );
-            arrow(gizmo,
-                selected_bounding_box.translation,
-                (best_dist*cuboid_face_normal(&selected_bounding_box, &dir)),
-                Color::srgb_u8(0, 255, 255)
-            );
-            arrow(gizmo,
-                selected_bounding_box.translation+cuboid_face(&selected_bounding_box,dir).0.0,
-                (best_dist*cuboid_face_normal(&selected_bounding_box, &dir)),
-                Color::srgb_u8(0, 255, 255)
-            );
-            gizmo.sphere(Isometry3d::from_translation(selected_bounding_box.translation+(best_dist*cuboid_face_normal(&selected_bounding_box, &dir))), 1.0, Color::srgb_u8(255, 0, 255));
-            
-            selected.0.position+=bevy_to_unity_translation(&(best_dist*cuboid_face_normal(&selected_bounding_box, &dir)));
-        }
-
-
-        // for pair in possible_positions.iter() {
-        //     for num in pair.1 {
-        //         gizmo.arrow(
-        //             selected_bounding_box.translation,
-        //             selected_bounding_box.translation+(num*cuboid_face_normal(&selected_bounding_box, pair.0)),
-        //             Color::srgb_u8(0, 255, 255)
-        //         );
-        //     }
-        //
-        // }
     }
 }
 
