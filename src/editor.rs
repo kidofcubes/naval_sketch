@@ -7,7 +7,7 @@ use rand::seq::IndexedRandom;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, get_relative_nearbys, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, get_relative_nearbys, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
 
 pub struct EditorPlugin;
 
@@ -43,6 +43,20 @@ impl Plugin for EditorPlugin {
         command_tree.add_command(b"F");
 
         command_trees[CommandMode::Translation]=command_tree;
+
+
+        let mut command_tree = CommandTree::default();
+
+        command_tree.add_command(b"q");
+        command_tree.add_command(b"e");
+        command_tree.add_command(b"w");
+        command_tree.add_command(b"a");
+        command_tree.add_command(b"s");
+        command_tree.add_command(b"d");
+
+        command_tree.add_command(b"f");
+
+        command_trees[CommandMode::Attributes]=command_tree;
 
         app.insert_resource(
             CommandData {
@@ -162,6 +176,7 @@ fn execute_queued_commands(
     mut selected: Query<Entity, With<Selected>>,
     mut all_parts: Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
     part_registry: Res<PartRegistry>,
+    mut display_properties: ResMut<PropertiesDisplayData>,
     mut gizmo: Gizmos,
     key: Res<ButtonInput<KeyCode>>,
 ){
@@ -188,6 +203,12 @@ fn execute_queued_commands(
                 _ => {}
             },
             CommandMode::Attributes => match queued_command.command.as_str() {
+                "a" => switch_selected_attribute(&mut display_properties, -1,false),
+                "d" => switch_selected_attribute(&mut display_properties, 1 ,false),
+                "q" => switch_selected_attribute(&mut display_properties, -5,false),
+                "e" => switch_selected_attribute(&mut display_properties, 5 ,false),
+
+                //"f" => modify_selected_attribute(display_properties, selected_parts, attribute, value),
                 _ => {}
             },
             CommandMode::Rotation => todo!(),
@@ -407,6 +428,39 @@ fn command_typing(
             _ => {},
         }
     }
+}
+
+
+fn modify_selected_attribute(
+    display_properties: &mut ResMut<PropertiesDisplayData>,
+    mut selected_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>, Option<&mut Turret>), With<Selected>>,
+    attribute: PartAttributes,
+    value: f32
+){
+    if attribute.is_number() {
+        for mut selected_part in &mut selected_parts {
+            attribute.set_field(&mut selected_part.0, selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value.to_string());
+        }
+    }
+}
+
+
+fn switch_selected_attribute(
+    display_properties: &mut ResMut<PropertiesDisplayData>,
+    offset: i32,
+    do_loop: bool
+){
+    let variants: Vec<&PartAttributes> = PartAttributes::VARIANTS.iter().collect();
+    let mut position = variants.iter().position(|&a| *a == display_properties.selected).unwrap();
+    if do_loop {
+        position=(((position as i32+offset) as i32).rem_euclid(variants.len() as i32)) as usize;
+    }else{
+        position = ((position as i32+offset).clamp(0,variants.len() as i32-1)) as usize;
+    }
+    display_properties.selected = *variants[position];
+
+
+    //display_properties.selected
 }
 
 

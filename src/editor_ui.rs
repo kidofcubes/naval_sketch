@@ -1,7 +1,7 @@
 use core::f32;
 use std::{fmt::Display, iter::once, ops::{Deref, DerefMut}};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, ColorToComponents, Luminance, Srgba}, ecs::{event::EventCursor, query::{self, Or}, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::BoundingVolume, Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextFont, TextLayout}, ui::{BackgroundColor, FlexDirection, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, ColorToComponents, Luminance, Srgba}, ecs::{event::EventCursor, query::{self, Or}, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::BoundingVolume, Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextColor, TextFont, TextLayout}, ui::{BackgroundColor, FlexDirection, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::{mock::StepRng, SmallRng, StdRng}, Rng, SeedableRng};
 use regex::Regex;
@@ -14,7 +14,8 @@ impl Plugin for EditorUiPlugin {
     fn build(&self, app: &mut bevy::app::App) {
         app.insert_resource(
             PropertiesDisplayData {
-                displays: EnumMap::new_option()
+                displays: EnumMap::new_option(),
+                selected: PartAttributes::PositionX
             }
         );
 
@@ -46,6 +47,7 @@ impl Plugin for EditorUiPlugin {
             }
         );
         app.add_systems(Startup, (spawn_ui));
+        app.add_systems(Update, (on_part_display_changed));
         app.insert_resource(
             CommandDisplayData {
                 mult: -1.0,
@@ -73,6 +75,7 @@ pub struct CommandDisplayData {
 #[derive(Resource)]
 pub struct PropertiesDisplayData {
     pub displays: EnumMap<PartAttributes,Option<Entity>,{PartAttributes::SIZE}>, 
+    pub selected: PartAttributes,
 }
 
 /// Spawn a bit of UI text to explain how to move the player.
@@ -82,7 +85,7 @@ pub fn spawn_ui(
     mut properties_display_data: ResMut<PropertiesDisplayData>,
     mut commands: Commands
 ) {
-    font_data.mult = 4.0;
+    font_data.mult = 2.0;
     font_data.font_size = 13.0;
     font_data.font_width = 6.0;
 
@@ -162,7 +165,7 @@ pub fn spawn_ui(
                 top: Val::Px(12.0),
                 right: Val::Px(12.0),
                 height: Val::Auto,
-                width: Val::Px(768.0),
+                width: Val::Px(40.0*(font_data.font_width*font_data.mult)),
                 flex_direction: FlexDirection::Column,
                 ..default()
             },
@@ -176,7 +179,19 @@ pub fn spawn_ui(
     ;
 }
 
-#[derive(Enumerated, Debug, Copy, Clone)]
+fn on_part_display_changed(
+    mut text_color_query: Query<&mut TextColor>,
+    display_properties: Res<PropertiesDisplayData>
+){
+    if display_properties.is_changed() {
+        for attribute in PartAttributes::VARIANTS {
+            text_color_query.get_mut(display_properties.displays[*attribute].unwrap()).unwrap().0 = Color::srgb_u8(255, 255, 255);
+        }
+        text_color_query.get_mut(display_properties.displays[display_properties.selected].unwrap()).unwrap().0 = Color::srgb_u8(128, 128, 255);
+    }
+}
+
+#[derive(Enumerated, PartialEq, Debug, Copy, Clone)]
 pub enum PartAttributes {
     //BasePart
     Id,
@@ -208,7 +223,17 @@ pub enum PartAttributes {
     Elevator
 }
 impl PartAttributes {
-    fn get_field(&self, base_part: &BasePart, adjustable_hull: Option<&AdjustableHull>, turret: Option<&Turret>) -> Option<String>{
+    pub fn is_number(&self) -> bool{
+        match self {
+            PartAttributes::Id => true,
+            PartAttributes::IgnorePhysics => false,
+            PartAttributes::Color => false,
+            PartAttributes::ManualControl => false,
+            _ => true
+        }
+    }
+
+    pub fn get_field(&self, base_part: &BasePart, adjustable_hull: Option<&AdjustableHull>, turret: Option<&Turret>) -> Option<String>{
         let mut string: Option<String> = None;
 
         string = match self {
@@ -259,7 +284,7 @@ impl PartAttributes {
 
         return string;
     }
-    fn set_field(&self, base_part: &mut BasePart, adjustable_hull: Option<&mut AdjustableHull>, turret: Option<&mut Turret>, text: &str) -> Result<(),Box<dyn std::error::Error>>{
+    pub fn set_field(&self, base_part: &mut BasePart, adjustable_hull: Option<&mut AdjustableHull>, turret: Option<&mut Turret>, text: &str) -> Result<(),Box<dyn std::error::Error>>{
         match self {
             PartAttributes::Id => {base_part.id = text.parse()?},
             PartAttributes::IgnorePhysics => {base_part.id = text.parse()?},
@@ -314,6 +339,7 @@ fn attribute_editor(parent: &mut ChildBuilder, attribute: PartAttributes, font: 
                 ..default()
             },
             Text::new(format!("{:?}: ???",attribute)),
+            TextColor::WHITE,
             font,
     )).id();
 }
@@ -641,3 +667,4 @@ pub fn update_command_text(
         text_query.get_mut(command_display_data.history_text_display.unwrap()).unwrap().0 =history_text;
     }
 }
+
