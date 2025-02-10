@@ -5,7 +5,7 @@ use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, Hovered}, parsing::{AdjustableHull, BasePart}, parts::{get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{editor::{DebugGizmo, GizmoDisplay}, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, Hovered, PartAttributes}, parsing::{AdjustableHull, BasePart}, parts::{get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
 
 
 
@@ -101,14 +101,16 @@ pub fn get_nearby<'a>(
     check_dist: bool,
     check_offset: bool,
     /* gizmo: &mut Gizmos */
-) -> HashMap<u8,Vec<(&'a Transform,u8)>> {
-    let mut nearby: HashMap<u8,Vec<(&'a Transform,u8)>> = HashMap::new();
+) -> HashMap<u8,Vec<(usize,u8)>> {
+    let mut nearby: HashMap<u8,Vec<(usize,u8)>> = HashMap::new();
     let mut faces :Vec<((Vec3,Vec3,Vec3),Vec3)> = Vec::with_capacity(6);
     for i in 0..6 {
         faces.push(cuboid_face(origin, i as u8));
     }
 
-    for check in to_check {
+
+    for check_index in 0..to_check.len() {
+        let check = &to_check[check_index];
         if check==origin {
             continue;
         }
@@ -164,7 +166,7 @@ pub fn get_nearby<'a>(
             if !nearby.contains_key(&touched.0) {
                 nearby.insert(touched.0,Vec::new());
             }
-            nearby.get_mut(&touched.0).unwrap().push((check,touched.1));
+            nearby.get_mut(&touched.0).unwrap().push((check_index,touched.1));
         }
 
         //nearby.push(check);
@@ -173,29 +175,29 @@ pub fn get_nearby<'a>(
 }
 
 
-pub fn get_relative_nearbys<'a>(origin: &Transform, to_check: &'a Vec<Transform>, dir: &Dir3/* , gizmo: &mut Gizmos */) -> (Vec<(&'a Transform,u8)>, u8) {
-    let mut nearbys = get_nearby(origin, to_check,false,false/* , gizmo */);
-    let mut best_side: u8 = 0;
-    let mut best_dist: f32 = f32::MAX;
-    
-    for i in 0..6 {
-        let num = Quat::from_rotation_arc(origin.rotation.mul_vec3(dir_from_index(&i)), **dir).to_axis_angle().1.abs();
-        if num < best_dist {
-            best_dist = num;
-            best_side = i;
-        }
-    }
-    // for pair in nearbys.iter() {
-    //     gizmo.arrow(origin.translation,origin.translation+cuboid_face(origin, *pair.0).0.0, Color::srgb_u8(255, 0, 0));
-    // }
-    // gizmo.arrow(origin.translation,origin.translation+cuboid_face(origin, best_side).0.0.normalize(), Color::srgb_u8(255, 255, 255));
-
-    
-    return (
-        nearbys.remove(&best_side).unwrap_or(Vec::new()),
-        best_side
-    );
-}
+// pub fn get_relative_nearbys<'a>(origin: &Transform, to_check: &'a Vec<Transform>, dir: &Dir3/* , gizmo: &mut Gizmos */) -> (Vec<(&'a Transform,u8)>, u8) {
+//     let mut nearbys = get_nearby(origin, to_check,false,false/* , gizmo */);
+//     let mut best_side: u8 = 0;
+//     let mut best_dist: f32 = f32::MAX;
+//     
+//     for i in 0..6 {
+//         let num = Quat::from_rotation_arc(origin.rotation.mul_vec3(dir_from_index(&i)), **dir).to_axis_angle().1.abs();
+//         if num < best_dist {
+//             best_dist = num;
+//             best_side = i;
+//         }
+//     }
+//     // for pair in nearbys.iter() {
+//     //     gizmo.arrow(origin.translation,origin.translation+cuboid_face(origin, *pair.0).0.0, Color::srgb_u8(255, 0, 0));
+//     // }
+//     // gizmo.arrow(origin.translation,origin.translation+cuboid_face(origin, best_side).0.0.normalize(), Color::srgb_u8(255, 255, 255));
+//
+//     
+//     return (
+//         nearbys.remove(&best_side).unwrap_or(Vec::new()),
+//         best_side
+//     );
+// }
 
 pub fn round_to_axis(a: &Transform, dir: &Dir3) -> u8{
     let mut best_side: u8 = 0;
@@ -533,4 +535,165 @@ pub fn simple_closest_dist(a: &Transform, b: &Transform) -> f32{
     return (b_aabb.closest_point(point)-point).length();
 }
 
+pub fn adjacent_adjustable_hulls(
+    origin_pair: (&Transform, &AdjustableHull),
+    to_check: &Vec<(Transform, AdjustableHull)>,
+    gizmos_debug: &mut ResMut<DebugGizmo>,
+) -> HashMap<u8,(usize,u8)> {
+    let mut sides: HashMap<u8,(usize,u8)> = HashMap::new();
+    let origin = origin_pair.0;
+    let origin_hull = origin_pair.1;
+    
+    for check_index in 0..to_check.len() {
+        let check = &to_check[check_index].0;
+        let check_hull = &to_check[check_index].1;
 
+        if check.up() != origin.up() {
+            //gizmos_debug.to_display.push(GizmoDisplay::Sphere(check.translation, 0.5, Color::srgb_u8(255, 0, 255)));
+            continue;
+        }
+        //if (check.forward() != origin.forward()) && (check.back() != *origin.forward())  {
+        if (check.forward().distance_squared(*origin.forward())< f32::EPSILON*10.0) && (check.back().distance_squared(*origin.forward())< f32::EPSILON*10.0)  {
+            //println!("origin forward is {:?} and check {:?}",origin.forward(),check.forward());
+            //gizmos_debug.to_display.push(GizmoDisplay::Sphere(check.translation, 0.5, Color::srgb_u8(255, 255, 255)));
+            continue;
+        }
+
+        let dist = check.translation - origin.translation;
+        if dist.dot(*origin.right()) > f32::EPSILON*10.0 {
+            // println!("THE DIST WAS {:?} OTHER WAS {:?} and i was {:?} and right is {:?} and result is {:?}",dist,check.translation,origin.translation,origin.right(),dist.dot(*origin.right()));
+            // println!("THE ROTATION OF ORIGIN IS {:?} AND CHECK IS {:?}",origin.rotation,check.rotation);
+            // gizmos_debug.to_display.push(GizmoDisplay::Sphere(check.translation, 0.5, Color::srgb_u8(255, 0, 0)));
+            continue;
+        }
+
+
+
+        if dist.dot(*origin.forward()).abs() > f32::EPSILON*10.0 { //ahead/behind
+            if dist.dot(*origin.up()).abs() > f32::EPSILON*10.0 {
+                //gizmos_debug.to_display.push(GizmoDisplay::Sphere(check.translation, 0.5, Color::srgb_u8(255, 0, 0)));
+                continue;
+            }
+            if origin.scale.y != check.scale.y {continue;}
+            if (dist.dot(*origin.forward()).abs() - ((origin.scale.z+check.scale.z)/2.0)).abs() > f32::EPSILON {
+                //println!("the dist was {:?}",(dist.dot(*origin.forward()).abs() - ((origin.scale.z+check.scale.z)/2.0)).abs());
+                continue;
+            }
+
+            let origin_is_front: bool = dist.dot(*origin.forward()) < 0.0;
+            let check_is_front: bool =  dist.dot(*check.forward()) > 0.0;
+
+            if origin_hull.top_roundness != check_hull.top_roundness || origin_hull.bottom_roundness != check_hull.bottom_roundness {
+                continue;
+            }
+
+            let origin_bottom_total_width = if origin_is_front {origin_hull.front_width}else{origin_hull.back_width};
+            let origin_top_total_width =    if origin_is_front {origin_hull.front_width+origin_hull.front_spread}else{origin_hull.back_width+origin_hull.back_spread};
+
+            let check_bottom_total_width =  if check_is_front {check_hull.front_width}else{check_hull.back_width};
+            let check_top_total_width =     if check_is_front {check_hull.front_width+check_hull.front_spread}else{check_hull.back_width+check_hull.back_spread};
+
+            // println!("origin_is_front {:?} check_is_front {:?}",origin_is_front,check_is_front);
+            // println!("the origin top {:?} bottom {:?}",origin_top_total_width,origin_bottom_total_width);
+            // println!("the check top {:?} bottom {:?}",check_top_total_width,check_bottom_total_width);
+
+            if origin_top_total_width != check_top_total_width || origin_bottom_total_width != check_bottom_total_width {continue;}
+
+
+
+
+            sides.insert(if origin_is_front {5}else{2},(check_index,if check_is_front {5}else{2}));
+        } else if dist.dot(*origin.up()).abs() > f32::EPSILON*10.0 { //above/below
+            if dist.dot(*origin.forward()).abs() > f32::EPSILON*10.0 {
+                //gizmos_debug.to_display.push(GizmoDisplay::Sphere(check.translation, 0.5, Color::srgb_u8(0, 0, 255)));
+                continue;
+            }
+            if origin.scale.z != check.scale.z {continue;}
+            if (dist.dot(*origin.up()).abs() - ((origin.scale.y+check.scale.y)/2.0)).abs() > f32::EPSILON {
+                continue;
+            }
+
+
+            let origin_is_top: bool = dist.dot(*origin.down()) < 0.0;
+            let check_is_top: bool =  dist.dot(*check.down()) > 0.0;
+
+            let origin_roundness = if origin_is_top {origin_hull.top_roundness}else{origin_hull.bottom_roundness};
+            let check_roundness = if check_is_top {check_hull.top_roundness}else{check_hull.bottom_roundness};
+
+            if origin_roundness!=0.0 || check_roundness!=0.0 {continue;}
+
+            let origin_front_width = if origin_is_top {origin_hull.front_width+origin_hull.front_spread}else{origin_hull.front_width};
+            let origin_back_width = if origin_is_top {origin_hull.back_width+origin_hull.back_spread}else{origin_hull.back_width};
+
+
+            let mut check_front_width = if check_is_top {check_hull.front_width+check_hull.front_spread}else{check_hull.front_width};
+            let mut check_back_width = if check_is_top {check_hull.back_width+check_hull.back_spread}else{check_hull.back_width};
+
+            let same_direction: bool = origin.forward().dot(*check.forward()) > 0.0;
+
+            if !same_direction {
+                std::mem::swap(&mut check_front_width, &mut check_back_width);
+            }
+
+
+            if origin_front_width != check_front_width || origin_back_width != check_back_width {continue;}
+
+            sides.insert(if origin_is_top {1}else{4},(check_index,if check_is_top {1}else{4}));
+        }
+        if sides.len() == 4 { break; }
+
+        
+        
+
+        // 'origin_faces: for i in 0..6 {
+        //     'check_faces: for j in 0..6 {
+        //         if 
+        //             cuboid_face_normal(origin, i)==cuboid_face_normal(check, j) && 
+        //                 (
+        //                     cuboid_face_normal(origin, (i+1)%6)==cuboid_face_normal(check, (j+1)%6) ||
+        //                     cuboid_face_normal(origin, (i+1)%6)==cuboid_face_normal(check, (j+1)%6)
+        //
+        //                 )
+        //         {
+        //
+        //         }
+        //     }
+        // }
+    }
+    return sides;
+}
+
+
+// pub fn same_end_face(hull1: &AdjustableHull, side1: u8, hull2: &AdjustableHull, side2: u8) -> bool {
+//     if (!(side1 == 2 || side1 == 5)) || (!(side2 == 2 || side2 == 5)) {
+//         return false;
+//     }
+//
+//     let spread1 = if side1==2 {hull1.back_spread}else{hull1.front_spread};
+//     let width1  = if side1==2 {hull1.back_width}else{hull1.front_width};
+//
+//     let spread2 = if side2==2 {hull2.back_spread}else{hull2.front_spread};
+//     let width2  = if side2==2 {hull2.back_width}else{hull2.front_width};
+//
+//     return spread1 == spread2 && width1 == width2;
+// }
+
+// pub fn shared_attributes(property: PartAttributes, facing_1: &Transform, hull1: &AdjustableHull, side1: u8, facing_2: &Transform, hull2: &AdjustableHull, side2: u8){
+//     match property {
+//         PartAttributes::BackWidth => { // face 2
+//             if side1==5 { //back 
+//                 if side2 == 2 || side2 == 5 {
+//
+//                 }
+//                 if nearby.1 == 2 { //front
+//                     other_adjustable_hull.front_width=*value;
+//                 } else if nearby.1 == 5 { //back
+//                     other_adjustable_hull.back_width=*value;
+//                 }
+//             }
+//         }
+//         _ => {}
+//     }
+//
+//     
+// }

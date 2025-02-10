@@ -7,7 +7,7 @@ use rand::seq::IndexedRandom;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor::Selected, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, get_relative_nearbys, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{editor::{DebugGizmo, EditorData, GizmoDisplay, Selected}, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{adjacent_adjustable_hulls, arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
 
 
 #[derive(Event)]
@@ -27,13 +27,214 @@ pub fn add_actions(app: &mut App) {
 
 pub fn modify_selected_attribute(
     trigger: Trigger<EditorActionEvent>,
+    editor_data: Res<EditorData>,
+    part_registry: Res<PartRegistry>,
     display_properties: Res<PropertiesDisplayData>,
-    mut selected_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>, Option<&mut Turret>), With<Selected>>,
+    mut gizmos_debug: ResMut<DebugGizmo>,
+    mut all_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>, Option<&mut Turret>, Entity)>,
+    selected_parts: Query<Entity, With<Selected>>,
+    mut gizmo: Gizmos,
 ){
     let EditorActionEvent::SetSelectedAttribute{value} = trigger.event() else {return;};
+    gizmos_debug.to_display.clear();
+
+    let mut all_colliders: Vec<(Transform,AdjustableHull)> = Vec::new();
+    let mut all_colliders_entities: Vec<Entity>= Vec::new();
+
+    let mut all_orig_adjustable_hulls: HashMap<Entity,AdjustableHull> = HashMap::new();
+
+    if editor_data.edit_near && display_properties.selected.is_adjustable_hull() {
+        for part in &all_parts {
+            let Some(adjustable_hull) = part.1.as_deref() else {continue;};
+            all_colliders.push((get_collider(part.0.deref(), Some(adjustable_hull), part_registry.parts.get(&part.0.id).unwrap()),(adjustable_hull.clone())));
+            all_colliders_entities.push(part.3);
+            all_orig_adjustable_hulls.insert(part.3,adjustable_hull.clone());
+        }
+    }
+
+
     if display_properties.selected.is_number() {
-        for mut selected_part in &mut selected_parts {
-            display_properties.selected.set_field(&mut selected_part.0, selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value.to_string());
+        for selected_entity in &selected_parts {
+            let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
+            //let original_adjustable_hull = selected_part.1.as_ref().map(|x| x.as_ref().clone());
+
+            display_properties.selected.set_field(Some(&mut selected_part.0), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value.to_string());
+
+            println!("is it the thing {:?} and {:?}", editor_data.edit_near, display_properties.selected.is_adjustable_hull()); 
+
+            if editor_data.edit_near && display_properties.selected.is_adjustable_hull() && selected_part.1.is_some() {
+                let Some(origin_hull) = selected_part.1.as_deref() else {continue;};
+                let origin_hull = origin_hull.clone();
+
+                let original_adjustable_hull = 
+                    //all_colliders[all_colliders_entities.iter().position(|x| x.clone()==selected_entity).unwrap()].1;
+                    all_orig_adjustable_hulls.get(&selected_entity.clone()).unwrap();
+                let collider = get_collider(selected_part.0.deref(), Some(&original_adjustable_hull), part_registry.parts.get(&selected_part.0.id).unwrap());
+                println!("THE ADJUSTABLE HULL TO CHECK IS {:?}",origin_hull);
+                let adjacents = adjacent_adjustable_hulls((&collider,&original_adjustable_hull), &all_colliders, &mut gizmos_debug);
+
+                for adjacent in adjacents {
+                     gizmos_debug.to_display.push(GizmoDisplay::Cuboid(all_colliders[adjacent.1.0].0, Color::srgb_u8(255, 0, 255)));
+                    // gizmos_debug.to_display.push(GizmoDisplay::Arrow(collider.translation,collider.translation+cuboid_face_normal(&collider, &adjacent.0), Color::srgb_u8(255, 0, 255)));
+
+                    let mut adjacent_hull = all_parts.get_mut(all_colliders_entities[adjacent.1.0]).unwrap().1.unwrap();
+                    let origin_facing = adjacent.0;
+                    let adjacent_facing = adjacent.1.1;
+                    match adjacent.0 {
+                        5 | 2 => {
+                            match display_properties.selected {
+                                PartAttributes::TopRoundness |
+                                PartAttributes::BottomRoundness |
+                                PartAttributes::Height
+                                => {
+                                    display_properties.selected.set_field(None,Some(&mut adjacent_hull),None,&value.to_string());
+                                }
+                                _ => {}
+                            }
+
+                            if origin_facing == 5 { //forward
+                                match display_properties.selected {
+                                    PartAttributes::FrontWidth => {if adjacent_facing == 5 {adjacent_hull.front_width=*value;}else{adjacent_hull.back_width=*value;}},
+                                    PartAttributes::FrontSpread => {if adjacent_facing == 5 {adjacent_hull.front_spread=*value;}else{adjacent_hull.back_spread=*value;}},
+                                    _ => {}
+                                }
+                            }else{
+                                match display_properties.selected {
+                                    PartAttributes::BackWidth => {if adjacent_facing == 5 {adjacent_hull.front_width=*value;}else{adjacent_hull.back_width=*value;}},
+                                    PartAttributes::BackSpread => {if adjacent_facing == 5 {adjacent_hull.front_spread=*value;}else{adjacent_hull.back_spread=*value;}},
+                                    _ => {}
+                                }
+                            }
+                        }
+                        1 | 4 => {
+                            match display_properties.selected {
+                                PartAttributes::Length => {
+                                    display_properties.selected.set_field(None,Some(&mut adjacent_hull),None,&value.to_string());
+                                }
+                                _ => {}
+                            }
+
+                            let same_direction: bool = all_colliders[adjacent.1.0].0.forward().dot(*collider.forward()) > 0.0;
+
+                            let changed_front = display_properties.selected == PartAttributes::FrontWidth || display_properties.selected == PartAttributes::FrontSpread;
+                            if origin_facing == 1 { //up
+                                
+                                let new_total_width = if changed_front {(origin_hull.front_width+origin_hull.front_spread)}else{(origin_hull.back_width+origin_hull.back_spread)};
+                                println!("NEW TOTAL WIDTH IS {:?}",new_total_width);
+
+                                match display_properties.selected {
+                                    PartAttributes::FrontWidth |
+                                    PartAttributes::FrontSpread |
+                                    PartAttributes::BackWidth |
+                                    PartAttributes::BackSpread
+                                    => {
+                                        if adjacent_facing == 1 {
+                                            if changed_front ^ same_direction {
+                                                adjacent_hull.back_spread=new_total_width-adjacent_hull.back_width;
+                                            }else{
+                                                adjacent_hull.front_spread=new_total_width-adjacent_hull.front_width;
+                                            }
+                                        }else{
+                                            if changed_front ^ same_direction {
+                                                adjacent_hull.back_spread=(adjacent_hull.back_spread+adjacent_hull.back_width)-new_total_width;
+                                                adjacent_hull.back_width=new_total_width;
+                                            }else{
+                                                adjacent_hull.front_spread=(adjacent_hull.front_spread+adjacent_hull.front_width)-new_total_width;
+                                                adjacent_hull.front_width=new_total_width;
+                                            }
+                                        }
+                                    },
+                                    _ => {}
+                                }
+                            }else{
+
+                                let new_total_width = if changed_front {(origin_hull.front_width)}else{(origin_hull.back_width)};
+
+                                match display_properties.selected {
+                                    PartAttributes::FrontWidth |
+                                    PartAttributes::FrontSpread |
+                                    PartAttributes::BackWidth |
+                                    PartAttributes::BackSpread
+                                    => {
+                                        if adjacent_facing == 1 {
+                                            if changed_front ^ same_direction {
+                                                adjacent_hull.back_spread=new_total_width-adjacent_hull.back_width;
+                                            }else{
+                                                adjacent_hull.front_spread=new_total_width-adjacent_hull.front_width;
+                                            }
+                                        }else{
+                                            if changed_front ^ same_direction {
+                                                adjacent_hull.back_spread=(adjacent_hull.back_spread+adjacent_hull.back_width)-new_total_width;
+                                                adjacent_hull.back_width=new_total_width;
+                                            }else{
+                                                adjacent_hull.front_spread=(adjacent_hull.front_spread+adjacent_hull.front_width)-new_total_width;
+                                                adjacent_hull.front_width=new_total_width;
+                                            }
+                                        }
+                                    },
+                                    _ => {}
+                                }
+
+                            }
+                        }
+
+                        _ => {}
+                    }
+                }
+                
+
+                // let nearbys = get_nearby(&collider, &all_colliders, true, true);
+                // for sides in nearbys {
+                //     for nearby in sides.1 {
+                //         let Some(mut other_adjustable_hull) = all_parts.get_mut(all_colliders_entities[nearby.0]).unwrap().1 else {
+                //             continue;
+                //         };
+                //         
+                //         match display_properties.selected {
+                //             PartAttributes::BackWidth => { // face 2
+                //                 if sides.0==5 { //back
+                //                     if nearby.1 == 2 { //front
+                //                         other_adjustable_hull.front_width=*value;
+                //                     } else if nearby.1 == 5 { //back
+                //                         other_adjustable_hull.back_width=*value;
+                //                     }
+                //                 }
+                //                 if sides.0==2 { //fronhttps://steamcommunity.com/comment/10/bounce/76561198394977868/18446744073709551615/?feature2=18446744073709551615&tscn=1739165767t
+                //                     if nearby.1 == 2 { //front
+                //                         other_adjustable_hull.back_width=*value;
+                //                     } else if nearby.1 == 5 { //back
+                //                         other_adjustable_hull.front_width=*value;
+                //                     }
+                //                 }
+                //             }
+                //             PartAttributes::FrontWidth => { // face 2
+                //                 if sides.0==5 { //back
+                //                     if nearby.1 == 2 { //front
+                //                         other_adjustable_hull.back_width=*value;
+                //                     } else if nearby.1 == 5 { //back
+                //                         other_adjustable_hull.front_width=*value;
+                //                     }
+                //                 }
+                //                 if sides.0==2 { //front
+                //                     if nearby.1 == 2 { //front
+                //                         other_adjustable_hull.front_width=*value;
+                //                     } else if nearby.1 == 5 { //back
+                //                         other_adjustable_hull.back_width=*value;
+                //                     }
+                //                 }
+                //             }
+                //             
+                //             _ => {}
+                //         }
+                //         match sides.0 {
+                //
+                //             _ => {}
+                //         }
+                //         //
+                //         // gizmos_debug.to_display.push(GizmoDisplay::Cuboid(*nearby.0, Color::srgb_u8(255, 0, 255)));
+                //     }
+                // }
+            }
         }
     }
 }
@@ -85,6 +286,7 @@ pub fn move_selected_relative_dir(
 }
 
 
+//need to figure out what to do when multiple parts
 
 pub fn smart_move_selected_relative_dir(
     trigger: Trigger<EditorActionEvent>,
@@ -117,22 +319,23 @@ pub fn smart_move_selected_relative_dir(
 
 
             for nearby in dir_nearbys.get(&i).unwrap() {
+                let nearby_transform = &other_parts[nearby.0];
 
-                if simple_closest_dist(&selected_bounding_box, nearby.0) > (1.0) {
+                if simple_closest_dist(&selected_bounding_box, nearby_transform) > (1.0) {
                     continue;
                 }
                 //gizmo.cuboid(*nearby.0,Color::srgb_u8(0, 255, 255));
 
-                let face = cuboid_face(nearby.0, nearby.1);
+                let face = cuboid_face(nearby_transform, nearby.1);
                 let mut dotted_dist = (face.1-selected_shared_face.1);
 
                 possible_positions.try_insert(i, Vec::new());
                 possible_positions.get_mut(&i).unwrap().push((face.1-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()));
-                possible_positions.get_mut(&i).unwrap().push((nearby.0.translation-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()));
+                possible_positions.get_mut(&i).unwrap().push((nearby_transform.translation-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()));
 
                 possible_positions.try_insert((i+3)%6, Vec::new());
                 possible_positions.get_mut(&((i+3)%6)).unwrap().push(((face.1-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()))*-1.0);
-                possible_positions.get_mut(&((i+3)%6)).unwrap().push(((nearby.0.translation-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()))*-1.0);
+                possible_positions.get_mut(&((i+3)%6)).unwrap().push(((nearby_transform.translation-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()))*-1.0);
 
 
                 // println!("the diff is {:?}",((face.1-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize())));
@@ -143,7 +346,7 @@ pub fn smart_move_selected_relative_dir(
                 // cuboid_face_normal(&selected_bounding_box, &i)*
                 // ((nearby.0.translation-selected_bounding_box.translation).dot(cuboid_face_normal(&selected_bounding_box, &i)));
 
-                let face = cuboid_face(nearby.0, (nearby.1+(0*3))%6);
+                let face = cuboid_face(nearby_transform, (nearby.1+(0*3))%6);
                 //let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
                 let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
                 thing.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, face.0.0.normalize());

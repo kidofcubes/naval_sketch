@@ -7,7 +7,40 @@ use rand::seq::IndexedRandom;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor_actions::EditorActionEvent, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, get_relative_nearbys, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{editor_actions::EditorActionEvent, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+
+#[derive(Resource)]
+pub struct DebugGizmo{
+    pub to_display: Vec<GizmoDisplay>,
+}
+
+pub enum GizmoDisplay {
+    Cuboid(Transform,Color),
+    Arrow(Vec3,Vec3,Color),
+    Sphere(Vec3,f32,Color),
+}
+
+impl GizmoDisplay {
+    pub fn display(&self, gizmo: &mut Gizmos){
+        match self {
+            GizmoDisplay::Cuboid(transform, color) => {gizmo.cuboid(*transform,*color);},
+            GizmoDisplay::Arrow(pos1,pos2, color) => {gizmo.arrow(*pos1,*pos2,*color);},
+            GizmoDisplay::Sphere(pos,radius, color) => {gizmo.sphere(*pos,*radius,*color);},
+        }
+    }
+}
+
+fn debug_gizmos(
+    debug_data: Res<DebugGizmo>,
+    mut gizmo: Gizmos,
+){
+    for debug_thing in &debug_data.to_display {
+        debug_thing.display(&mut gizmo);
+    }
+}
+
+
+
 
 pub struct EditorPlugin;
 
@@ -19,6 +52,12 @@ impl Plugin for EditorPlugin {
                 action_history: Vec::new(),
                 queued_commands: Vec::new(),
                 floating: false,
+                edit_near: true,
+            }
+        );
+        app.insert_resource(
+            DebugGizmo {
+                to_display:Vec::new()
             }
         );
         
@@ -54,7 +93,7 @@ impl Plugin for EditorPlugin {
         command_tree.add_command(b"s");
         command_tree.add_command(b"d");
 
-        command_tree.add_command(b"f");
+        command_tree.add_command(b" ");
 
         command_trees[CommandMode::Attributes]=command_tree;
 
@@ -77,7 +116,9 @@ impl Plugin for EditorPlugin {
                 update_command_text,
                 execute_queued_commands,
                 render_gizmos,
+                debug_gizmos
         ));
+
 
     }
 }
@@ -93,9 +134,10 @@ pub enum CommandMode {
 
 #[derive(Resource)]
 pub struct EditorData {
-    action_history: Vec<Action>,
-    queued_commands: Vec<QueuedCommand>, //use deque?
-    floating: bool,
+    pub action_history: Vec<Action>,
+    pub queued_commands: Vec<QueuedCommand>, //use deque?
+    pub floating: bool,
+    pub edit_near: bool,
 }
 
 #[derive(Resource)]
@@ -141,8 +183,6 @@ impl CommandTree {
         return (false, false);
     }
 }
-
-
 
 #[derive(Component)]
 pub struct Selected {}
@@ -213,12 +253,12 @@ fn execute_queued_commands(
                 _ => {}
             },
             CommandMode::Attributes => match queued_command.command.as_str() {
-                "a" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:-1,do_loop:false});},
-                "d" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:1 ,do_loop:false});},
-                "q" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:-5,do_loop:false});},
-                "e" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:5 ,do_loop:false});},
+                "w" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:-1,do_loop:false});},
+                "s" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:1 ,do_loop:false});},
+                "a" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:-5,do_loop:false});},
+                "d" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:5 ,do_loop:false});},
 
-                "f" => {editor_commands.push(EditorActionEvent::SetSelectedAttribute {value: queued_command.multiplier});},
+                " " => {editor_commands.push(EditorActionEvent::SetSelectedAttribute {value: queued_command.multiplier});},
                 _ => {}
             },
             CommandMode::Rotation => todo!(),
@@ -353,69 +393,31 @@ fn command_typing(
         if !input.state.is_pressed() {
             continue;
         };
-        match &input.logical_key {
+        let char: Option<u8> = match &input.logical_key {
             Key::Character(smol_str) => {
                 if smol_str.len() > 1 {
-                    return;
-                }
-
-                let index = command_data.current_byte_index;
-                command_data.current_command.insert(index, smol_str.as_bytes()[0]); 
-                command_data.current_byte_index+=1;
-
-                let string = String::from_utf8(command_data.current_command.clone()).unwrap();
-
-                let regex: Regex = Regex::new(r"^(\d*(\.\d*)?)?([a-zA-Z]+)?$").unwrap();
-                if regex.is_match(&string) {
-                    let captures = regex.captures(&string).unwrap();
-                    let num = captures.get(1);
-                    let command = captures.get(3);
-                    if let Some(command_match) = command {
-                        let mut mult: f32 = 1.0;
-                        if let Some(num_match) = num{
-                            if let Ok(num) = num_match.as_str().parse::<f32>() {
-                                mult = num;
-                            }
-                        }
-
-                        let is_command = command_data.commands[command_data.mode].has_command(command_match.as_str().as_bytes());
-                        
-                        if is_command.0 {
-                            if is_command.1 {
-                                editor_data.queued_commands.push(
-                                    QueuedCommand {
-                                        multiplier: mult,
-                                        command: command_match.as_str().to_string(),
-                                    }
-                                );
-                                command_data.current_byte_index=0;
-                                command_data.current_command.clear();
-                            }
-                        }else{
-                            command_data.current_byte_index=0;
-                            command_data.current_command.clear();
-                        }
-                    }
+                    None
                 }else{
-                    command_data.current_byte_index=0;
-                    command_data.current_command.clear();
+                    Some(smol_str.as_bytes()[0])
                 }
+
+                
             },
             Key::Space => {
-                // let index = command_data.current_byte_index;
-                // command_data.current_command.insert(index, " ".as_bytes()[0]); 
-                // command_data.current_byte_index+=1;
+                Some(" ".as_bytes()[0])
             },
             //Key::ArrowDown => todo!(),
             Key::ArrowLeft => {
                 if command_data.current_byte_index != 0 {
                     command_data.current_byte_index-=1;
                 }
+                None
             },
             Key::ArrowRight => {
                 if command_data.current_byte_index != command_data.current_command.len() {
                     command_data.current_byte_index+=1;
                 }
+                None
             },
             //Key::ArrowUp => todo!(),
             Key::Escape => {
@@ -425,6 +427,7 @@ fn command_typing(
                     command_data.current_byte_index=0;
                     command_data.current_command.clear();
                 }
+                None
             }
             Key::Backspace => {
                 let index = command_data.current_byte_index;
@@ -432,14 +435,60 @@ fn command_typing(
                     command_data.current_command.remove(index-1);
                     command_data.current_byte_index-=1;
                 }
+                None
             }
             Key::Delete => {
                 let index = command_data.current_byte_index;
                 if index < command_data.current_command.len() {
                     command_data.current_command.remove(index);
                 }
+                None
             },
-            _ => {},
+            _ => None,
+        };
+
+        let Some(char) = char else{continue;};
+
+        let index = command_data.current_byte_index;
+        command_data.current_command.insert(index, char); 
+        command_data.current_byte_index+=1;
+
+        let string = String::from_utf8(command_data.current_command.clone()).unwrap();
+
+        let regex: Regex = Regex::new(r"^(\d*(\.\d*)?)?([a-zA-Z ]+)?$").unwrap();
+        if regex.is_match(&string) {
+            let captures = regex.captures(&string).unwrap();
+            let num = captures.get(1);
+            let command = captures.get(3);
+            if let Some(command_match) = command {
+                let mut mult: f32 = 1.0;
+                if let Some(num_match) = num{
+                    if let Ok(num) = num_match.as_str().parse::<f32>() {
+                        mult = num;
+                    }
+                }
+
+                let is_command = command_data.commands[command_data.mode].has_command(command_match.as_str().as_bytes());
+                
+                if is_command.0 {
+                    if is_command.1 {
+                        editor_data.queued_commands.push(
+                            QueuedCommand {
+                                multiplier: mult,
+                                command: command_match.as_str().to_string(),
+                            }
+                        );
+                        command_data.current_byte_index=0;
+                        command_data.current_command.clear();
+                    }
+                }else{
+                    command_data.current_byte_index=0;
+                    command_data.current_command.clear();
+                }
+            }
+        }else{
+            command_data.current_byte_index=0;
+            command_data.current_command.clear();
         }
     }
 }

@@ -1,12 +1,12 @@
 use core::f32;
 use std::{fmt::Display, iter::once, ops::{Deref, DerefMut}};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, ColorToComponents, Luminance, Srgba}, ecs::{event::EventCursor, query::{self, Or}, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::BoundingVolume, Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::{TextColor, TextFont, TextLayout}, ui::{BackgroundColor, FlexDirection, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets, RenderAssetUsages}, color::{Color, ColorToComponents, Luminance, Srgba}, ecs::{event::EventCursor, query::{self, Or}, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::BoundingVolume, Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::mesh::Mesh, text::{TextColor, TextFont, TextLayout}, ui::{BackgroundColor, FlexDirection, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::{mock::StepRng, SmallRng, StdRng}, Rng, SeedableRng};
 use regex::Regex;
 
-use crate::{editor::{CommandData, Selected}, editor_utils::{aabb_from_transform, cuboid_face, cuboid_face_normal, get_nearby, get_relative_nearbys, simple_closest_dist, transform_from_aabb}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, get_collider, unity_to_bevy_translation, PartRegistry}};
+use crate::{editor::{CommandData, Selected}, editor_utils::{aabb_from_transform, cuboid_face, cuboid_face_normal, get_nearby, simple_closest_dist, transform_from_aabb}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, unity_to_bevy_translation, BasePartMeshes, PartRegistry}};
 
 pub struct EditorUiPlugin;
 
@@ -232,6 +232,21 @@ impl PartAttributes {
             _ => true
         }
     }
+    pub fn is_adjustable_hull(&self) -> bool{
+        match self {
+            PartAttributes::Length => true,
+            PartAttributes::Height => true,
+            PartAttributes::FrontWidth => true,
+            PartAttributes::BackWidth => true,
+            PartAttributes::FrontSpread => true,
+            PartAttributes::BackSpread => true,
+            PartAttributes::TopRoundness => true,
+            PartAttributes::BottomRoundness => true,
+            PartAttributes::HeightScale => true,
+            PartAttributes::HeightOffset => true,
+            _ => false
+        }
+    }
 
     pub fn get_field(&self, base_part: &BasePart, adjustable_hull: Option<&AdjustableHull>, turret: Option<&Turret>) -> Option<String>{
         let mut string: Option<String> = None;
@@ -284,22 +299,24 @@ impl PartAttributes {
 
         return string;
     }
-    pub fn set_field(&self, base_part: &mut BasePart, adjustable_hull: Option<&mut AdjustableHull>, turret: Option<&mut Turret>, text: &str) -> Result<(),Box<dyn std::error::Error>>{
-        match self {
-            PartAttributes::Id => {base_part.id = text.parse()?},
-            PartAttributes::IgnorePhysics => {base_part.id = text.parse()?},
-            PartAttributes::PositionX => {base_part.position.x = text.parse()?},
-            PartAttributes::PositionY => {base_part.position.y = text.parse()?},
-            PartAttributes::PositionZ => {base_part.position.z = text.parse()?},
-            PartAttributes::RotationX => {base_part.rotation.x = text.parse()?},
-            PartAttributes::RotationY => {base_part.rotation.y = text.parse()?},
-            PartAttributes::RotationZ => {base_part.rotation.z = text.parse()?},
-            PartAttributes::ScaleX => {base_part.scale.x = text.parse()?},
-            PartAttributes::ScaleY => {base_part.scale.y = text.parse()?},
-            PartAttributes::ScaleZ => {base_part.scale.z = text.parse()?},
-            PartAttributes::Color => {base_part.color = Color::Srgba(Srgba::hex(text)?)},
-            PartAttributes::Armor => {base_part.armor = text.parse()?},
-            _ => {}
+    pub fn set_field(&self, base_part: Option<&mut BasePart>, adjustable_hull: Option<&mut AdjustableHull>, turret: Option<&mut Turret>, text: &str) -> Result<(),Box<dyn std::error::Error>>{
+        if let Some(base_part) = base_part {
+            match self {
+                PartAttributes::Id => {base_part.id = text.parse()?},
+                PartAttributes::IgnorePhysics => {base_part.id = text.parse()?},
+                PartAttributes::PositionX => {base_part.position.x = text.parse()?},
+                PartAttributes::PositionY => {base_part.position.y = text.parse()?},
+                PartAttributes::PositionZ => {base_part.position.z = text.parse()?},
+                PartAttributes::RotationX => {base_part.rotation.x = text.parse()?},
+                PartAttributes::RotationY => {base_part.rotation.y = text.parse()?},
+                PartAttributes::RotationZ => {base_part.rotation.z = text.parse()?},
+                PartAttributes::ScaleX => {base_part.scale.x = text.parse()?},
+                PartAttributes::ScaleY => {base_part.scale.y = text.parse()?},
+                PartAttributes::ScaleZ => {base_part.scale.z = text.parse()?},
+                PartAttributes::Color => {base_part.color = Color::Srgba(Srgba::hex(text)?)},
+                PartAttributes::Armor => {base_part.armor = text.parse()?},
+                _ => {}
+            }
         }
 
         if let Some(adjustable_hull) = adjustable_hull {
@@ -399,12 +416,14 @@ pub fn render_gizmos(
 
             for nearby in dir_nearbys.get(&i).unwrap_or(&Vec::new()) {
 
-                if simple_closest_dist(&selected_bounding_box, nearby.0) > (1.0) {
+                let nearby_transform = &other_parts[nearby.0];
+
+                if simple_closest_dist(&selected_bounding_box, nearby_transform) > (1.0) {
                     continue;
                 }
                 //gizmo.cuboid(*nearby.0,Color::srgb_u8(0, 255, 255));
 
-                let face = cuboid_face(nearby.0, nearby.1);
+                let face = cuboid_face(nearby_transform, nearby.1);
                 let mut dotted_dist = (face.1-selected_shared_face.1);
                 dotted_dist = dotted_dist - (dotted_dist.dot(selected_shared_face.0.0.normalize())*selected_shared_face.0.0.normalize());
                 
@@ -413,7 +432,7 @@ pub fn render_gizmos(
                     // ((nearby.0.translation-selected_bounding_box.translation).dot(cuboid_face_normal(&selected_bounding_box, &i)));
 
                 for j in 0..1 {
-                    let face = cuboid_face(nearby.0, (nearby.1+(j*3))%6);
+                    let face = cuboid_face(nearby_transform, (nearby.1+(j*3))%6);
                     //let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
                     let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
                     thing.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, face.0.0.normalize());
@@ -427,7 +446,7 @@ pub fn render_gizmos(
 
                     gizmo.rect(thing, Vec2::ONE*2.0, color);
 
-                    thing.translation = (nearby.0.translation-dotted_dist).into();
+                    thing.translation = (nearby_transform.translation-dotted_dist).into();
                     gizmo.rect(thing, Vec2::ONE*2.0, color);
                 }
 
@@ -562,19 +581,41 @@ pub fn on_part_changed(
     mut changed_base_part: Query<(&mut Transform, Entity), Or<(Changed<BasePart>,Changed<AdjustableHull>,Changed<Turret>)>>,
     //parts: Query<(Ref<BasePart>, Option<Ref<AdjustableHull>>, Option<Ref<Turret>>)>,
     parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)>,
+    base_part_meshes: Query<&BasePartMeshes>,
     selected: Query<Entity, With<Selected>>,
     mut text_query: Query<&mut Text>,
-    display_properties: Res<PropertiesDisplayData>
+    display_properties: Res<PropertiesDisplayData>,
+
+    mut meshes_query: Query<(&mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ){
     let mut has_changed = false;
     for mut pair in &mut changed_base_part {
-        println!("THE THING CHANGED OH MAI GAH {:?}",pair);
+        //println!("THE THING CHANGED OH MAI GAH {:?}",pair);
         let new_transform =
             base_part_to_bevy_transform(&parts.get(pair.1).unwrap().0);
         pair.0.translation = new_transform.translation;
         pair.0.rotation = new_transform.rotation;
         pair.0.scale = new_transform.scale;
         has_changed = true;
+
+        if let Some(adjustable_hull) = parts.get(pair.1).unwrap().1 {
+            let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD);
+            
+            generate_adjustable_hull_mesh(
+                &mut mesh,
+                adjustable_hull
+            );
+
+            meshes_query.get_mut(pair.1).unwrap().0.0 = meshes.add(mesh);
+        }
+
+        if let Ok(part_meshes) = base_part_meshes.get(pair.1) {
+            for mesh_entity in &part_meshes.meshes {
+                meshes_query.get_mut(*mesh_entity).unwrap().1.0 = materials.add(parts.get(pair.1).unwrap().0.color);
+            }
+        }
     }
     if !has_changed {return;}
 
