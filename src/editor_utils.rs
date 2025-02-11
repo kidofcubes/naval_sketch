@@ -2,6 +2,7 @@ use core::f32;
 use std::{collections::VecDeque, iter::once, ops::DerefMut};
 
 use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, gizmos::{self, aabb, primitives::dim3::Plane3dBuilder}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec2, Vec3, Vec3A}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoConfig, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Primitive3d, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use enum_collections::{EnumMap, Enumerated};
 use regex::Regex;
 use smol_str::SmolStr;
 
@@ -535,12 +536,76 @@ pub fn simple_closest_dist(a: &Transform, b: &Transform) -> f32{
     return (b_aabb.closest_point(point)-point).length();
 }
 
+
+#[derive(Enumerated, Debug, Copy, Clone, PartialEq)]
+pub enum AdjHullSide {
+    Front,
+    FrontTop,
+    FrontBottom,
+    Top,
+    Bottom,
+    Back,
+    BackTop,
+    BackBottom
+}
+
+
+
+
+pub fn with_corner_adjacent_adjustable_hulls(
+    origin_pair: (&Transform, &AdjustableHull),
+    to_check: &Vec<(Transform, AdjustableHull)>,
+    gizmos_debug: &mut ResMut<DebugGizmo>,
+) -> EnumMap<AdjHullSide,Option<(usize,bool,bool)>,{AdjHullSide::SIZE}>{
+    let orig_adjacents = adjacent_adjustable_hulls(origin_pair, to_check, gizmos_debug);
+
+    let mut adjacents: EnumMap<AdjHullSide,Option<(usize,bool,bool)>,{AdjHullSide::SIZE}> = EnumMap::new_option();
+
+    if let Some(x) = orig_adjacents.get(&5) {
+        adjacents[AdjHullSide::Front]=Some(*x);
+        let front_adjacents = adjacent_adjustable_hulls((&to_check[x.0].0,&to_check[x.0].1), to_check, gizmos_debug);
+        println!("the keys of the front are {:?}",front_adjacents.keys());
+        if let Some(y) = front_adjacents.get(&1){
+            adjacents[AdjHullSide::FrontTop]=Some((y.0,y.1 ^ x.1, y.2 ^ x.2));
+        }
+
+        if let Some(y) = front_adjacents.get(&4){
+            adjacents[AdjHullSide::FrontBottom]=Some((y.0,y.1 ^ x.1, y.2 ^ x.2));
+        }
+    }
+
+    if let Some(x) = orig_adjacents.get(&2) {
+        adjacents[AdjHullSide::Back]=Some(*x);
+        let back_adjacents = adjacent_adjustable_hulls((&to_check[x.0].0,&to_check[x.0].1), to_check, gizmos_debug);
+        if let Some(y) = back_adjacents.get(&1){
+            adjacents[AdjHullSide::BackTop]=Some((y.0,y.1 ^ x.1, y.2 ^ x.2));
+        }
+
+        if let Some(y) = back_adjacents.get(&4){
+            adjacents[AdjHullSide::BackBottom]=Some((y.0,y.1 ^ x.1, y.2 ^ x.2));
+        }
+    }
+
+
+    if let Some(x) = orig_adjacents.get(&1) {
+        adjacents[AdjHullSide::Top]=Some(*x);
+    }
+
+    if let Some(x) = orig_adjacents.get(&4) {
+        adjacents[AdjHullSide::Bottom]=Some(*x);
+    }
+
+    return adjacents;
+}
+
+
+
 pub fn adjacent_adjustable_hulls(
     origin_pair: (&Transform, &AdjustableHull),
     to_check: &Vec<(Transform, AdjustableHull)>,
     gizmos_debug: &mut ResMut<DebugGizmo>,
-) -> HashMap<u8,(usize,u8)> {
-    let mut sides: HashMap<u8,(usize,u8)> = HashMap::new();
+) -> HashMap<u8,(usize,bool,bool)> {
+    let mut sides: HashMap<u8,(usize,bool,bool)> = HashMap::new();
     let origin = origin_pair.0;
     let origin_hull = origin_pair.1;
     
@@ -548,16 +613,20 @@ pub fn adjacent_adjustable_hulls(
         let check = &to_check[check_index].0;
         let check_hull = &to_check[check_index].1;
 
-        if check.up() != origin.up() {
+        if (check.up().distance_squared(*origin.up())< f32::EPSILON*10.0) && (check.down().distance_squared(*origin.up())< f32::EPSILON*10.0)  {
             //gizmos_debug.to_display.push(GizmoDisplay::Sphere(check.translation, 0.5, Color::srgb_u8(255, 0, 255)));
             continue;
         }
+
+
+
         //if (check.forward() != origin.forward()) && (check.back() != *origin.forward())  {
         if (check.forward().distance_squared(*origin.forward())< f32::EPSILON*10.0) && (check.back().distance_squared(*origin.forward())< f32::EPSILON*10.0)  {
             //println!("origin forward is {:?} and check {:?}",origin.forward(),check.forward());
             //gizmos_debug.to_display.push(GizmoDisplay::Sphere(check.translation, 0.5, Color::srgb_u8(255, 255, 255)));
             continue;
         }
+
 
         let dist = check.translation - origin.translation;
         if dist.dot(*origin.right()) > f32::EPSILON*10.0 {
@@ -568,13 +637,18 @@ pub fn adjacent_adjustable_hulls(
         }
 
 
+        let vert_flipped = (check.down().distance_squared(*origin.up()) < f32::EPSILON*10.0);
+        let hori_flipped = (check.back().distance_squared(*origin.forward()) < f32::EPSILON*10.0);
 
         if dist.dot(*origin.forward()).abs() > f32::EPSILON*10.0 { //ahead/behind
+
+            //offset check
             if dist.dot(*origin.up()).abs() > f32::EPSILON*10.0 {
                 //gizmos_debug.to_display.push(GizmoDisplay::Sphere(check.translation, 0.5, Color::srgb_u8(255, 0, 0)));
                 continue;
             }
             if origin.scale.y != check.scale.y {continue;}
+            //touching check
             if (dist.dot(*origin.forward()).abs() - ((origin.scale.z+check.scale.z)/2.0)).abs() > f32::EPSILON {
                 //println!("the dist was {:?}",(dist.dot(*origin.forward()).abs() - ((origin.scale.z+check.scale.z)/2.0)).abs());
                 continue;
@@ -583,15 +657,23 @@ pub fn adjacent_adjustable_hulls(
             let origin_is_front: bool = dist.dot(*origin.forward()) < 0.0;
             let check_is_front: bool =  dist.dot(*check.forward()) > 0.0;
 
-            if origin_hull.top_roundness != check_hull.top_roundness || origin_hull.bottom_roundness != check_hull.bottom_roundness {
+            if 
+                origin_hull.top_roundness != if !vert_flipped {check_hull.top_roundness}else{check_hull.bottom_roundness} ||
+                origin_hull.bottom_roundness != if vert_flipped {check_hull.top_roundness}else{check_hull.bottom_roundness}
+            {
                 continue;
             }
 
             let origin_bottom_total_width = if origin_is_front {origin_hull.front_width}else{origin_hull.back_width};
             let origin_top_total_width =    if origin_is_front {origin_hull.front_width+origin_hull.front_spread}else{origin_hull.back_width+origin_hull.back_spread};
 
-            let check_bottom_total_width =  if check_is_front {check_hull.front_width}else{check_hull.back_width};
-            let check_top_total_width =     if check_is_front {check_hull.front_width+check_hull.front_spread}else{check_hull.back_width+check_hull.back_spread};
+            let mut check_bottom_total_width =  if check_is_front {check_hull.front_width}else{check_hull.back_width};
+            let mut check_top_total_width =     if check_is_front {check_hull.front_width+check_hull.front_spread}else{check_hull.back_width+check_hull.back_spread};
+
+            if vert_flipped {
+                std::mem::swap(&mut check_top_total_width, &mut check_bottom_total_width);
+            }
+            
 
             // println!("origin_is_front {:?} check_is_front {:?}",origin_is_front,check_is_front);
             // println!("the origin top {:?} bottom {:?}",origin_top_total_width,origin_bottom_total_width);
@@ -602,13 +684,17 @@ pub fn adjacent_adjustable_hulls(
 
 
 
-            sides.insert(if origin_is_front {5}else{2},(check_index,if check_is_front {5}else{2}));
+            sides.insert(if origin_is_front {5}else{2},(check_index,hori_flipped,vert_flipped));
         } else if dist.dot(*origin.up()).abs() > f32::EPSILON*10.0 { //above/below
+
+            //offset check
             if dist.dot(*origin.forward()).abs() > f32::EPSILON*10.0 {
                 //gizmos_debug.to_display.push(GizmoDisplay::Sphere(check.translation, 0.5, Color::srgb_u8(0, 0, 255)));
                 continue;
             }
             if origin.scale.z != check.scale.z {continue;}
+
+            //touching check
             if (dist.dot(*origin.up()).abs() - ((origin.scale.y+check.scale.y)/2.0)).abs() > f32::EPSILON {
                 continue;
             }
@@ -619,7 +705,7 @@ pub fn adjacent_adjustable_hulls(
 
             let origin_roundness = if origin_is_top {origin_hull.top_roundness}else{origin_hull.bottom_roundness};
             let check_roundness = if check_is_top {check_hull.top_roundness}else{check_hull.bottom_roundness};
-
+            
             if origin_roundness!=0.0 || check_roundness!=0.0 {continue;}
 
             let origin_front_width = if origin_is_top {origin_hull.front_width+origin_hull.front_spread}else{origin_hull.front_width};
@@ -629,16 +715,17 @@ pub fn adjacent_adjustable_hulls(
             let mut check_front_width = if check_is_top {check_hull.front_width+check_hull.front_spread}else{check_hull.front_width};
             let mut check_back_width = if check_is_top {check_hull.back_width+check_hull.back_spread}else{check_hull.back_width};
 
-            let same_direction: bool = origin.forward().dot(*check.forward()) > 0.0;
-
-            if !same_direction {
+            if hori_flipped {
                 std::mem::swap(&mut check_front_width, &mut check_back_width);
             }
 
 
-            if origin_front_width != check_front_width || origin_back_width != check_back_width {continue;}
+            if origin_front_width != check_front_width || origin_back_width != check_back_width {
+                continue;
+            }
 
-            sides.insert(if origin_is_top {1}else{4},(check_index,if check_is_top {1}else{4}));
+            //sides.insert(if origin_is_top {1}else{4},(check_index,if check_is_top {1}else{4}));
+            sides.insert(if origin_is_top {1}else{4},(check_index,hori_flipped,vert_flipped));
         }
         if sides.len() == 4 { break; }
 
@@ -661,6 +748,49 @@ pub fn adjacent_adjustable_hulls(
         // }
     }
     return sides;
+}
+
+// pub fn set_adjustable_hull_width_from_side(
+//     hull: &mut AdjustableHull,
+//     side: &AdjHullSide,
+//     hori_flipped: &bool,
+//     vert_flipped: &bool,
+// ){
+//     match side {
+//         AdjHullSide::Front => {
+//             
+//         },
+//         AdjHullSide::FrontTop => todo!(),
+//         AdjHullSide::FrontBottom => todo!(),
+//         AdjHullSide::Top => todo!(),
+//         AdjHullSide::Bottom => todo!(),
+//         AdjHullSide::Back => todo!(),
+//         AdjHullSide::BackTop => todo!(),
+//         AdjHullSide::BackBottom => todo!(),
+//     }
+// }
+
+pub fn set_adjustable_hull_width(
+    hull: &mut AdjustableHull,
+    back: &bool,
+    bottom: &bool,
+    value: &f32
+){
+    if *back {
+        if *bottom {
+            hull.back_spread=(hull.back_spread+hull.back_width)-value;
+            hull.back_width=*value;
+        }else{
+            hull.back_spread=value-hull.back_width;
+        }
+    }else{
+        if *bottom {
+            hull.front_spread=(hull.front_spread+hull.front_width)-value;
+            hull.front_width=*value;
+        }else{
+            hull.front_spread=value-hull.front_width;
+        }
+    }
 }
 
 

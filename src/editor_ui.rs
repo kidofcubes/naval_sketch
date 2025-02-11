@@ -6,7 +6,7 @@ use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::{mock::StepRng, SmallRng, StdRng}, Rng, SeedableRng};
 use regex::Regex;
 
-use crate::{editor::{CommandData, Selected}, editor_utils::{aabb_from_transform, cuboid_face, cuboid_face_normal, get_nearby, simple_closest_dist, transform_from_aabb}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, unity_to_bevy_translation, BasePartMeshes, PartRegistry}};
+use crate::{editor::{CommandData, CommandMode, EditorData, Selected}, editor_utils::{aabb_from_transform, cuboid_face, cuboid_face_normal, get_nearby, simple_closest_dist, transform_from_aabb}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, unity_to_bevy_translation, BasePartMeshes, PartRegistry}};
 
 pub struct EditorUiPlugin;
 
@@ -187,7 +187,7 @@ fn on_part_display_changed(
         for attribute in PartAttributes::VARIANTS {
             text_color_query.get_mut(display_properties.displays[*attribute].unwrap()).unwrap().0 = Color::srgb_u8(255, 255, 255);
         }
-        text_color_query.get_mut(display_properties.displays[display_properties.selected].unwrap()).unwrap().0 = Color::srgb_u8(128, 128, 255);
+        text_color_query.get_mut(display_properties.displays[display_properties.selected].unwrap()).unwrap().0 = Color::srgb_u8(0, 255, 0);
     }
 }
 
@@ -346,6 +346,37 @@ impl PartAttributes {
         return Ok(());
     }
 }
+impl Display for PartAttributes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,"{}",match self {
+            PartAttributes::Id => "Id",
+            PartAttributes::IgnorePhysics => "IgnorePhysics",
+            PartAttributes::PositionX => "Position|位置 X",
+            PartAttributes::PositionY => "Position|位置 Y",
+            PartAttributes::PositionZ => "Position|位置 Z",
+            PartAttributes::RotationX => "Rotation|旋转 X",
+            PartAttributes::RotationY => "Rotation|旋转 Y",
+            PartAttributes::RotationZ => "Rotation|旋转 Z",
+            PartAttributes::ScaleX => "Scale|尺度 X",
+            PartAttributes::ScaleY => "Scale|尺度 Y",
+            PartAttributes::ScaleZ => "Scale|尺度 Z",
+            PartAttributes::Color => "Color|颜色",
+            PartAttributes::Armor => "Armor|装甲",
+            PartAttributes::Length => "Length|长度",
+            PartAttributes::Height => "Height|高度",
+            PartAttributes::FrontWidth => "ForwardWidth|前段宽度",
+            PartAttributes::BackWidth => "BackwardWidth|后段宽度",
+            PartAttributes::FrontSpread => "ForwardSpread|前段扩散",
+            PartAttributes::BackSpread => "BackwardSpread|后段扩散",
+            PartAttributes::TopRoundness => "TopRoundness|上表面弧度",
+            PartAttributes::BottomRoundness => "BottomRoundness|下表面弧度",
+            PartAttributes::HeightScale => "HeightScale|高度缩放",
+            PartAttributes::HeightOffset => "HeightOffset|高度偏移",
+            PartAttributes::ManualControl => "ManualControl",
+            PartAttributes::Elevator => "Elevator",
+        })
+    }
+}
 
 
 fn attribute_editor(parent: &mut ChildBuilder, attribute: PartAttributes, font: TextFont) -> Entity{
@@ -375,6 +406,7 @@ fn random_color(seed: u64) -> Color {
 pub struct Hovered{}
 
 pub fn render_gizmos(
+    command_data: Res<CommandData>,
     mut selected: Query<Entity, With<Selected>>,
     all_parts: Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
     // hovered: Query<(&BasePart,Option<&AdjustableHull>),With<Hovered>>,
@@ -431,23 +463,25 @@ pub fn render_gizmos(
                     // cuboid_face_normal(&selected_bounding_box, &i)*
                     // ((nearby.0.translation-selected_bounding_box.translation).dot(cuboid_face_normal(&selected_bounding_box, &i)));
 
-                for j in 0..1 {
-                    let face = cuboid_face(nearby_transform, (nearby.1+(j*3))%6);
-                    //let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
-                    let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
-                    thing.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, face.0.0.normalize());
+                if let CommandMode::Translation = command_data.mode {
+                    for j in 0..1 {
+                        let face = cuboid_face(nearby_transform, (nearby.1+(j*3))%6);
+                        //let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
+                        let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
+                        thing.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, face.0.0.normalize());
 
-                    let color = match((nearby.1+(j*3))%6) {
-                        0|3 => Color::srgb_u8(255, 0, 0),
-                        1|4 => Color::srgb_u8(0, 255, 0),
-                        2|5 => Color::srgb_u8(0, 0, 255),
-                        _ => panic!()
-                    };
+                        let color = match((nearby.1+(j*3))%6) {
+                            0|3 => Color::srgb_u8(255, 0, 0),
+                            1|4 => Color::srgb_u8(0, 255, 0),
+                            2|5 => Color::srgb_u8(0, 0, 255),
+                            _ => panic!()
+                        };
 
-                    gizmo.rect(thing, Vec2::ONE*2.0, color);
+                        gizmo.rect(thing, Vec2::ONE*2.0, color);
 
-                    thing.translation = (nearby_transform.translation-dotted_dist).into();
-                    gizmo.rect(thing, Vec2::ONE*2.0, color);
+                        thing.translation = (nearby_transform.translation-dotted_dist).into();
+                        gizmo.rect(thing, Vec2::ONE*2.0, color);
+                    }
                 }
 
             }

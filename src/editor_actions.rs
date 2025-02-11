@@ -7,7 +7,7 @@ use rand::seq::IndexedRandom;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor::{DebugGizmo, EditorData, GizmoDisplay, Selected}, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{adjacent_adjustable_hulls, arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{editor::{DebugGizmo, EditorData, GizmoDisplay, Selected}, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{adjacent_adjustable_hulls, arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
 
 
 #[derive(Event)]
@@ -71,112 +71,240 @@ pub fn modify_selected_attribute(
                     all_orig_adjustable_hulls.get(&selected_entity.clone()).unwrap();
                 let collider = get_collider(selected_part.0.deref(), Some(&original_adjustable_hull), part_registry.parts.get(&selected_part.0.id).unwrap());
                 println!("THE ADJUSTABLE HULL TO CHECK IS {:?}",origin_hull);
-                let adjacents = adjacent_adjustable_hulls((&collider,&original_adjustable_hull), &all_colliders, &mut gizmos_debug);
+                let adjacents = with_corner_adjacent_adjustable_hulls((&collider,&original_adjustable_hull), &all_colliders, &mut gizmos_debug);
 
-                for adjacent in adjacents {
-                     gizmos_debug.to_display.push(GizmoDisplay::Cuboid(all_colliders[adjacent.1.0].0, Color::srgb_u8(255, 0, 255)));
+
+
+
+
+                let changed_front = display_properties.selected != PartAttributes::BackWidth && display_properties.selected != PartAttributes::BackSpread;
+                let changed_back = display_properties.selected != PartAttributes::FrontWidth && display_properties.selected != PartAttributes::FrontSpread;
+                let changed_top = 
+                    display_properties.selected == PartAttributes::FrontWidth ||
+                    display_properties.selected == PartAttributes::BackWidth ||
+                    display_properties.selected == PartAttributes::FrontSpread ||
+                    display_properties.selected == PartAttributes::BackSpread ||
+
+                    display_properties.selected == PartAttributes::TopRoundness;
+                let changed_bottom = 
+                    display_properties.selected == PartAttributes::FrontWidth ||
+                    display_properties.selected == PartAttributes::BackWidth ||
+                    display_properties.selected == PartAttributes::BottomRoundness;
+
+
+
+
+                for origin_side in AdjHullSide::VARIANTS{
+                    let Some(adjacent) = adjacents[*origin_side] else {continue;};
+                    gizmos_debug.to_display.push(GizmoDisplay::Cuboid(all_colliders[adjacent.0].0, Color::srgb_u8(255, 0, 255)));
                     // gizmos_debug.to_display.push(GizmoDisplay::Arrow(collider.translation,collider.translation+cuboid_face_normal(&collider, &adjacent.0), Color::srgb_u8(255, 0, 255)));
 
-                    let mut adjacent_hull = all_parts.get_mut(all_colliders_entities[adjacent.1.0]).unwrap().1.unwrap();
-                    let origin_facing = adjacent.0;
-                    let adjacent_facing = adjacent.1.1;
-                    match adjacent.0 {
-                        5 | 2 => {
+                    let mut adjacent_hull = all_parts.get_mut(all_colliders_entities[adjacent.0]).unwrap().1.unwrap();
+                    let hori_flipped = adjacent.1;
+                    let vert_flipped = adjacent.2;
+
+                    //println!("we are now fixing up {:?} which is {:?} and {:?}",adjacent_hull,hori_flipped,vert_flipped);
+                    
+
+                    match origin_side {
+                        AdjHullSide::Front => {
+                            if !changed_front {continue;}
+
                             match display_properties.selected {
-                                PartAttributes::TopRoundness |
-                                PartAttributes::BottomRoundness |
-                                PartAttributes::Height
-                                => {
-                                    display_properties.selected.set_field(None,Some(&mut adjacent_hull),None,&value.to_string());
+                                PartAttributes::FrontWidth=>{
+                                    set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, value);
+                                    set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, &(value+origin_hull.front_spread));
                                 }
+                                PartAttributes::FrontSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, &(value+origin_hull.front_width));}
+                                PartAttributes::TopRoundness|PartAttributes::BottomRoundness=>{if changed_top^vert_flipped {adjacent_hull.top_roundness=*value;}else{adjacent_hull.bottom_roundness=*value;}}
+                                PartAttributes::Height=>{adjacent_hull.height=*value;}
                                 _ => {}
                             }
-
-                            if origin_facing == 5 { //forward
-                                match display_properties.selected {
-                                    PartAttributes::FrontWidth => {if adjacent_facing == 5 {adjacent_hull.front_width=*value;}else{adjacent_hull.back_width=*value;}},
-                                    PartAttributes::FrontSpread => {if adjacent_facing == 5 {adjacent_hull.front_spread=*value;}else{adjacent_hull.back_spread=*value;}},
-                                    _ => {}
-                                }
-                            }else{
-                                match display_properties.selected {
-                                    PartAttributes::BackWidth => {if adjacent_facing == 5 {adjacent_hull.front_width=*value;}else{adjacent_hull.back_width=*value;}},
-                                    PartAttributes::BackSpread => {if adjacent_facing == 5 {adjacent_hull.front_spread=*value;}else{adjacent_hull.back_spread=*value;}},
-                                    _ => {}
-                                }
-                            }
                         }
-                        1 | 4 => {
+                        AdjHullSide::FrontTop => {
+                            if !(changed_front && changed_top) {continue;}
+
                             match display_properties.selected {
-                                PartAttributes::Length => {
-                                    display_properties.selected.set_field(None,Some(&mut adjacent_hull),None,&value.to_string());
-                                }
+                                PartAttributes::FrontWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, &(value+origin_hull.front_spread));}
+                                PartAttributes::FrontSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, &(value+origin_hull.front_width));}
                                 _ => {}
                             }
+                        }
+                        AdjHullSide::FrontBottom => {
+                            if !(changed_front && changed_bottom) {continue;}
 
-                            let same_direction: bool = all_colliders[adjacent.1.0].0.forward().dot(*collider.forward()) > 0.0;
-
-                            let changed_front = display_properties.selected == PartAttributes::FrontWidth || display_properties.selected == PartAttributes::FrontSpread;
-                            if origin_facing == 1 { //up
-                                
-                                let new_total_width = if changed_front {(origin_hull.front_width+origin_hull.front_spread)}else{(origin_hull.back_width+origin_hull.back_spread)};
-                                println!("NEW TOTAL WIDTH IS {:?}",new_total_width);
-
-                                match display_properties.selected {
-                                    PartAttributes::FrontWidth |
-                                    PartAttributes::FrontSpread |
-                                    PartAttributes::BackWidth |
-                                    PartAttributes::BackSpread
-                                    => {
-                                        if adjacent_facing == 1 {
-                                            if changed_front ^ same_direction {
-                                                adjacent_hull.back_spread=new_total_width-adjacent_hull.back_width;
-                                            }else{
-                                                adjacent_hull.front_spread=new_total_width-adjacent_hull.front_width;
-                                            }
-                                        }else{
-                                            if changed_front ^ same_direction {
-                                                adjacent_hull.back_spread=(adjacent_hull.back_spread+adjacent_hull.back_width)-new_total_width;
-                                                adjacent_hull.back_width=new_total_width;
-                                            }else{
-                                                adjacent_hull.front_spread=(adjacent_hull.front_spread+adjacent_hull.front_width)-new_total_width;
-                                                adjacent_hull.front_width=new_total_width;
-                                            }
-                                        }
-                                    },
-                                    _ => {}
-                                }
-                            }else{
-
-                                let new_total_width = if changed_front {(origin_hull.front_width)}else{(origin_hull.back_width)};
-
-                                match display_properties.selected {
-                                    PartAttributes::FrontWidth |
-                                    PartAttributes::FrontSpread |
-                                    PartAttributes::BackWidth |
-                                    PartAttributes::BackSpread
-                                    => {
-                                        if adjacent_facing == 1 {
-                                            if changed_front ^ same_direction {
-                                                adjacent_hull.back_spread=new_total_width-adjacent_hull.back_width;
-                                            }else{
-                                                adjacent_hull.front_spread=new_total_width-adjacent_hull.front_width;
-                                            }
-                                        }else{
-                                            if changed_front ^ same_direction {
-                                                adjacent_hull.back_spread=(adjacent_hull.back_spread+adjacent_hull.back_width)-new_total_width;
-                                                adjacent_hull.back_width=new_total_width;
-                                            }else{
-                                                adjacent_hull.front_spread=(adjacent_hull.front_spread+adjacent_hull.front_width)-new_total_width;
-                                                adjacent_hull.front_width=new_total_width;
-                                            }
-                                        }
-                                    },
-                                    _ => {}
-                                }
-
+                            match display_properties.selected {
+                                PartAttributes::FrontWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, value);}
+                                _ => {}
                             }
                         }
+
+
+                        AdjHullSide::Back => {
+                            if !changed_back {continue;}
+
+                            match display_properties.selected {
+                                PartAttributes::BackWidth=>{
+                                    set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, value);
+                                    set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &vert_flipped, &(value+origin_hull.back_spread));
+                                }
+                                PartAttributes::BackSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &vert_flipped, &(value+origin_hull.back_width));}
+                                PartAttributes::TopRoundness|PartAttributes::BottomRoundness=>{if changed_top^vert_flipped {adjacent_hull.top_roundness=*value;}else{adjacent_hull.bottom_roundness=*value;}}
+                                PartAttributes::Height=>{adjacent_hull.height=*value;}
+                                _ => {}
+                            }
+                        }
+                        AdjHullSide::BackTop => {
+                            if !(changed_back && changed_top) {continue;}
+
+                            match display_properties.selected {
+                                PartAttributes::BackWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, &(value+origin_hull.back_spread));}
+                                PartAttributes::BackSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, &(value+origin_hull.back_width));}
+                                _ => {}
+                            }
+                        }
+                        AdjHullSide::BackBottom => {
+                            if !(changed_back && changed_bottom) {continue;}
+
+                            match display_properties.selected {
+                                PartAttributes::BackWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &vert_flipped, value);}
+                                _ => {}
+                            }
+                        }
+
+
+                        AdjHullSide::Top => {
+                            if !changed_top {continue;}
+
+                            match display_properties.selected {
+                                PartAttributes::FrontSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, &(value+origin_hull.front_width));}
+                                PartAttributes::BackSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, &(value+origin_hull.back_width));}
+                                PartAttributes::FrontWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, &(value+origin_hull.front_spread));}
+                                PartAttributes::BackWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, &(value+origin_hull.back_spread));}
+                                _ => {}
+                            }
+                        }
+                        AdjHullSide::Bottom => {
+                            if !changed_bottom {continue;}
+
+                            match display_properties.selected {
+                                PartAttributes::FrontWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &vert_flipped, &value);}
+                                PartAttributes::BackWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, &value);}
+                                _ => {}
+                            }
+                        }
+
+                        // AdjHullSide::Front | AdjHullSide::Back => {
+                        //     // match display_properties.selected {
+                        //     //     PartAttributes::TopRoundness |
+                        //     //     PartAttributes::BottomRoundness |
+                        //     //     PartAttributes::Height
+                        //     //     => {
+                        //     //         display_properties.selected.set_field(None,Some(&mut adjacent_hull),None,&value.to_string());
+                        //     //     }
+                        //     //     _ => {}
+                        //     // }
+                        //
+                        //
+                        //     
+                        //
+                        //     if changed_front {
+                        //
+                        //     }
+                        //
+                        //     if vert_flipped {
+                        //         match display_properties.selected {
+                        //             PartAttributes::FrontWidth => {if hori_flipped {adjacent_hull.front_width=*value;}else{adjacent_hull.back_width=*value;}},
+                        //             PartAttributes::FrontSpread => {if hori_flipped {adjacent_hull.front_spread=*value;}else{adjacent_hull.back_spread=*value;}},
+                        //             _ => {}
+                        //         }
+                        //     }
+                        //
+                        //     if *origin_side == AdjHullSide::Front { //forward
+                        //     }else{
+                        //         match display_properties.selected {
+                        //             PartAttributes::BackWidth => {if adjacent_facing == 5 {adjacent_hull.front_width=*value;}else{adjacent_hull.back_width=*value;}},
+                        //             PartAttributes::BackSpread => {if adjacent_facing == 5 {adjacent_hull.front_spread=*value;}else{adjacent_hull.back_spread=*value;}},
+                        //             _ => {}
+                        //         }
+                        //     }
+                        //
+                        //
+                        //
+                        //
+                        //
+                        // }
+                        // AdjHullSide::Top | AdjHullSide::Bottom => {
+                        //     match display_properties.selected {
+                        //         PartAttributes::Length => {
+                        //             display_properties.selected.set_field(None,Some(&mut adjacent_hull),None,&value.to_string());
+                        //         }
+                        //         _ => {}
+                        //     }
+                        //
+                        //     let same_direction: bool = all_colliders[adjacent.1.0].0.forward().dot(*collider.forward()) > 0.0;
+                        //
+                        //     let changed_front = display_properties.selected == PartAttributes::FrontWidth || display_properties.selected == PartAttributes::FrontSpread;
+                        //     if origin_facing == 1 { //up
+                        //         
+                        //         let new_total_width = if changed_front {(origin_hull.front_width+origin_hull.front_spread)}else{(origin_hull.back_width+origin_hull.back_spread)};
+                        //         println!("NEW TOTAL WIDTH IS {:?}",new_total_width);
+                        //
+                        //         match display_properties.selected {
+                        //             PartAttributes::FrontWidth |
+                        //             PartAttributes::FrontSpread |
+                        //             PartAttributes::BackWidth |
+                        //             PartAttributes::BackSpread
+                        //             => {
+                        //                 if adjacent_facing == 1 {
+                        //                     if changed_front ^ same_direction {
+                        //                         adjacent_hull.back_spread=new_total_width-adjacent_hull.back_width;
+                        //                     }else{
+                        //                         adjacent_hull.front_spread=new_total_width-adjacent_hull.front_width;
+                        //                     }
+                        //                 }else{
+                        //                     if changed_front ^ same_direction {
+                        //                         adjacent_hull.back_spread=(adjacent_hull.back_spread+adjacent_hull.back_width)-new_total_width;
+                        //                         adjacent_hull.back_width=new_total_width;
+                        //                     }else{
+                        //                         adjacent_hull.front_spread=(adjacent_hull.front_spread+adjacent_hull.front_width)-new_total_width;
+                        //                         adjacent_hull.front_width=new_total_width;
+                        //                     }
+                        //                 }
+                        //             },
+                        //             _ => {}
+                        //         }
+                        //     }else{
+                        //
+                        //         let new_total_width = if changed_front {(origin_hull.front_width)}else{(origin_hull.back_width)};
+                        //
+                        //         match display_properties.selected {
+                        //             PartAttributes::FrontWidth |
+                        //             PartAttributes::FrontSpread |
+                        //             PartAttributes::BackWidth |
+                        //             PartAttributes::BackSpread
+                        //             => {
+                        //                 if adjacent_facing == 1 {
+                        //                     if changed_front ^ same_direction {
+                        //                         adjacent_hull.back_spread=new_total_width-adjacent_hull.back_width;
+                        //                     }else{
+                        //                         adjacent_hull.front_spread=new_total_width-adjacent_hull.front_width;
+                        //                     }
+                        //                 }else{
+                        //                     if changed_front ^ same_direction {
+                        //                         adjacent_hull.back_spread=(adjacent_hull.back_spread+adjacent_hull.back_width)-new_total_width;
+                        //                         adjacent_hull.back_width=new_total_width;
+                        //                     }else{
+                        //                         adjacent_hull.front_spread=(adjacent_hull.front_spread+adjacent_hull.front_width)-new_total_width;
+                        //                         adjacent_hull.front_width=new_total_width;
+                        //                     }
+                        //                 }
+                        //             },
+                        //             _ => {}
+                        //         }
+                        //
+                        //     }
+                        // }
 
                         _ => {}
                     }
