@@ -6,7 +6,7 @@ use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::{mock::StepRng, SmallRng, StdRng}, Rng, SeedableRng};
 use regex::Regex;
 
-use crate::{editor::{CommandData, CommandMode, EditorData, Selected}, editor_utils::{aabb_from_transform, cuboid_face, cuboid_face_normal, get_nearby, simple_closest_dist, transform_from_aabb}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, unity_to_bevy_translation, BasePartMeshes, PartRegistry}};
+use crate::{editor::{CommandData, CommandMode, EditorData, Selected}, editor_utils::{aabb_from_transform, adjacent_adjustable_hulls, cuboid_face, cuboid_face_normal, get_nearby, simple_closest_dist, transform_from_aabb, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, unity_to_bevy_translation, BasePartMeshes, PartRegistry}};
 
 pub struct EditorUiPlugin;
 
@@ -407,8 +407,11 @@ pub struct Hovered{}
 
 pub fn render_gizmos(
     command_data: Res<CommandData>,
+    editor_data: Res<EditorData>,
+    display_properties: Res<PropertiesDisplayData>,
     mut selected: Query<Entity, With<Selected>>,
-    all_parts: Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
+    //all_parts: Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
+    all_parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>, Entity)>,
     // hovered: Query<(&BasePart,Option<&AdjustableHull>),With<Hovered>>,
     // selected: Query<(&BasePart,Option<&AdjustableHull>),With<Selected>>,
     // all_parts: Query<(&BasePart,Option<&AdjustableHull>)>,
@@ -423,47 +426,88 @@ pub fn render_gizmos(
     //     // );
     // }
 
-    let mut other_parts = Vec::new();
-    for part in &all_parts {
-        other_parts.push(get_collider(part.0, part.1, part_registry.parts.get(&part.0.id).unwrap()))
-    }
-
+    
     for selected_entity in &selected {
-
         let selected = all_parts.get(selected_entity).unwrap();
-
         let selected_bounding_box = get_collider(selected.0, selected.1, part_registry.parts.get(&selected.0.id).unwrap());
-
-        let dir_nearbys = get_nearby(&selected_bounding_box, &other_parts,false,false /* ,&mut gizmos */);
-
-        let mut possible_positions: HashMap<u8,Vec<f32>> = HashMap::new();
-
         gizmo.cuboid(
             selected_bounding_box,
             Color::srgb_u8(0, 255, 0)
         );
-        for i in 0..6 as u8 {
-            let selected_shared_face = cuboid_face(&selected_bounding_box,i);
+    }
 
 
-            for nearby in dir_nearbys.get(&i).unwrap_or(&Vec::new()) {
+    if command_data.mode==CommandMode::Attributes {
+        if editor_data.edit_near && display_properties.selected.is_adjustable_hull() {
 
-                let nearby_transform = &other_parts[nearby.0];
+            let mut all_colliders: Vec<(Transform,AdjustableHull)> = Vec::new();
 
-                if simple_closest_dist(&selected_bounding_box, nearby_transform) > (1.0) {
-                    continue;
-                }
-                //gizmo.cuboid(*nearby.0,Color::srgb_u8(0, 255, 255));
+            for part in &all_parts {
+                let Some(adjustable_hull) = part.1.as_deref() else {continue;};
+                all_colliders.push((get_collider(part.0, Some(adjustable_hull), part_registry.parts.get(&part.0.id).unwrap()),(adjustable_hull.clone())));
+            }
+            for selected_entity in &selected {
+                let selected_part = all_parts.get(selected_entity).unwrap();
+                if selected_part.1.is_some() {
+                    let collider = get_collider(selected_part.0, selected_part.1.as_deref(), part_registry.parts.get(&selected_part.0.id).unwrap());
+                    // let adjacents = with_corner_adjacent_adjustable_hulls((&collider,selected_part.1.unwrap()), &all_colliders);
+                    // 
+                    // for origin_side in AdjHullSide::VARIANTS{
+                    //     let Some(adjacent) = adjacents[*origin_side] else {continue;};
+                    //     gizmo.cuboid(all_colliders[adjacent.0].0, Color::srgb_u8(255, 0, 255));
+                    // }
 
-                let face = cuboid_face(nearby_transform, nearby.1);
-                let mut dotted_dist = (face.1-selected_shared_face.1);
-                dotted_dist = dotted_dist - (dotted_dist.dot(selected_shared_face.0.0.normalize())*selected_shared_face.0.0.normalize());
-                
+                    let adjacents2 = adjacent_adjustable_hulls((&collider,selected_part.1.unwrap()), &all_colliders);
                     
-                    // cuboid_face_normal(&selected_bounding_box, &i)*
-                    // ((nearby.0.translation-selected_bounding_box.translation).dot(cuboid_face_normal(&selected_bounding_box, &i)));
+                    for adjacent in adjacents2{
+                        gizmo.cuboid(all_colliders[adjacent.1.0].0, Color::srgb_u8(255, 0, 255));
+                    }
+                }
+            }
+        }
+    }
 
-                if let CommandMode::Translation = command_data.mode {
+
+
+
+
+    if command_data.mode==CommandMode::Translation {
+        let mut other_parts = Vec::new();
+        for part in &all_parts {
+            other_parts.push(get_collider(part.0, part.1, part_registry.parts.get(&part.0.id).unwrap()))
+        }
+
+        for selected_entity in &selected {
+
+            let selected = all_parts.get(selected_entity).unwrap();
+
+            let selected_bounding_box = get_collider(selected.0, selected.1, part_registry.parts.get(&selected.0.id).unwrap());
+
+            let dir_nearbys = get_nearby(&selected_bounding_box, &other_parts,false,false /* ,&mut gizmos */);
+
+            let mut possible_positions: HashMap<u8,Vec<f32>> = HashMap::new();
+
+            for i in 0..6 as u8 {
+                let selected_shared_face = cuboid_face(&selected_bounding_box,i);
+
+
+                for nearby in dir_nearbys.get(&i).unwrap_or(&Vec::new()) {
+
+                    let nearby_transform = &other_parts[nearby.0];
+
+                    if simple_closest_dist(&selected_bounding_box, nearby_transform) > (1.0) {
+                        continue;
+                    }
+                    //gizmo.cuboid(*nearby.0,Color::srgb_u8(0, 255, 255));
+
+                    let face = cuboid_face(nearby_transform, nearby.1);
+                    let mut dotted_dist = (face.1-selected_shared_face.1);
+                    dotted_dist = dotted_dist - (dotted_dist.dot(selected_shared_face.0.0.normalize())*selected_shared_face.0.0.normalize());
+                    
+                        
+                        // cuboid_face_normal(&selected_bounding_box, &i)*
+                        // ((nearby.0.translation-selected_bounding_box.translation).dot(cuboid_face_normal(&selected_bounding_box, &i)));
+
                     for j in 0..1 {
                         let face = cuboid_face(nearby_transform, (nearby.1+(j*3))%6);
                         //let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
@@ -483,7 +527,6 @@ pub fn render_gizmos(
                         gizmo.rect(thing, Vec2::ONE*2.0, color);
                     }
                 }
-
             }
         }
     }

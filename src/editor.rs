@@ -123,7 +123,7 @@ impl Plugin for EditorPlugin {
     }
 }
 
-#[derive(Enumerated, Copy, Clone, Debug)]
+#[derive(Enumerated, Copy, Clone, Debug, PartialEq)]
 pub enum CommandMode {
     Translation,
     Attributes,

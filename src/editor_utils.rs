@@ -555,15 +555,15 @@ pub enum AdjHullSide {
 pub fn with_corner_adjacent_adjustable_hulls(
     origin_pair: (&Transform, &AdjustableHull),
     to_check: &Vec<(Transform, AdjustableHull)>,
-    gizmos_debug: &mut ResMut<DebugGizmo>,
+    /* gizmos_debug: &mut ResMut<DebugGizmo>, */
 ) -> EnumMap<AdjHullSide,Option<(usize,bool,bool)>,{AdjHullSide::SIZE}>{
-    let orig_adjacents = adjacent_adjustable_hulls(origin_pair, to_check, gizmos_debug);
+    let orig_adjacents = adjacent_adjustable_hulls(origin_pair, to_check/* , gizmos_debug */);
 
     let mut adjacents: EnumMap<AdjHullSide,Option<(usize,bool,bool)>,{AdjHullSide::SIZE}> = EnumMap::new_option();
 
     if let Some(x) = orig_adjacents.get(&5) {
         adjacents[AdjHullSide::Front]=Some(*x);
-        let front_adjacents = adjacent_adjustable_hulls((&to_check[x.0].0,&to_check[x.0].1), to_check, gizmos_debug);
+        let front_adjacents = adjacent_adjustable_hulls((&to_check[x.0].0,&to_check[x.0].1), to_check/* , gizmos_debug */);
         println!("the keys of the front are {:?}",front_adjacents.keys());
         if let Some(y) = front_adjacents.get(&1){
             adjacents[AdjHullSide::FrontTop]=Some((y.0,y.1 ^ x.1, y.2 ^ x.2));
@@ -576,7 +576,7 @@ pub fn with_corner_adjacent_adjustable_hulls(
 
     if let Some(x) = orig_adjacents.get(&2) {
         adjacents[AdjHullSide::Back]=Some(*x);
-        let back_adjacents = adjacent_adjustable_hulls((&to_check[x.0].0,&to_check[x.0].1), to_check, gizmos_debug);
+        let back_adjacents = adjacent_adjustable_hulls((&to_check[x.0].0,&to_check[x.0].1), to_check/* , gizmos_debug */);
         if let Some(y) = back_adjacents.get(&1){
             adjacents[AdjHullSide::BackTop]=Some((y.0,y.1 ^ x.1, y.2 ^ x.2));
         }
@@ -603,7 +603,7 @@ pub fn with_corner_adjacent_adjustable_hulls(
 pub fn adjacent_adjustable_hulls(
     origin_pair: (&Transform, &AdjustableHull),
     to_check: &Vec<(Transform, AdjustableHull)>,
-    gizmos_debug: &mut ResMut<DebugGizmo>,
+    /* gizmos_debug: &mut ResMut<DebugGizmo>, */
 ) -> HashMap<u8,(usize,bool,bool)> {
     let mut sides: HashMap<u8,(usize,bool,bool)> = HashMap::new();
     let origin = origin_pair.0;
@@ -696,17 +696,25 @@ pub fn adjacent_adjustable_hulls(
 
             //touching check
             if (dist.dot(*origin.up()).abs() - ((origin.scale.y+check.scale.y)/2.0)).abs() > f32::EPSILON {
+                println!("up down too far away it was {:?}",(dist.dot(*origin.up()).abs() - ((origin.scale.y+check.scale.y)/2.0).abs()).abs());
                 continue;
             }
+
+            println!("its right position is it good though");
 
 
             let origin_is_top: bool = dist.dot(*origin.down()) < 0.0;
             let check_is_top: bool =  dist.dot(*check.down()) > 0.0;
+            println!("hori_flipped {:?} vert_flipped {:?}",hori_flipped,vert_flipped);
+            println!("origin_is_top {:?} check_is_top {:?}",origin_is_top,check_is_top);
 
             let origin_roundness = if origin_is_top {origin_hull.top_roundness}else{origin_hull.bottom_roundness};
             let check_roundness = if check_is_top {check_hull.top_roundness}else{check_hull.bottom_roundness};
             
-            if origin_roundness!=0.0 || check_roundness!=0.0 {continue;}
+            if origin_roundness!=0.0 || check_roundness!=0.0 {
+                println!("failed roundness test origin_roundness {:?} check_roundness {:?}",origin_roundness,check_roundness);
+                continue;
+            }
 
             let origin_front_width = if origin_is_top {origin_hull.front_width+origin_hull.front_spread}else{origin_hull.front_width};
             let origin_back_width = if origin_is_top {origin_hull.back_width+origin_hull.back_spread}else{origin_hull.back_width};
@@ -721,6 +729,14 @@ pub fn adjacent_adjustable_hulls(
 
 
             if origin_front_width != check_front_width || origin_back_width != check_back_width {
+                println!("width is wrong");
+                println!("trying to add the numbers {:?}",34.87+0.085);
+                println!("trying to add the numbers {:?}",33.65+0.345);
+                println!("origin_front_width {:?} check_front_width {:?}",origin_front_width,check_front_width);
+                println!("origin_back_width {:?} check_back_width {:?}",origin_back_width,check_back_width);
+                println!("the me was {:?}",origin_hull);
+                println!("the other was {:?}",check_hull);
+
                 continue;
             }
 

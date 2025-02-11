@@ -71,7 +71,7 @@ pub fn modify_selected_attribute(
                     all_orig_adjustable_hulls.get(&selected_entity.clone()).unwrap();
                 let collider = get_collider(selected_part.0.deref(), Some(&original_adjustable_hull), part_registry.parts.get(&selected_part.0.id).unwrap());
                 println!("THE ADJUSTABLE HULL TO CHECK IS {:?}",origin_hull);
-                let adjacents = with_corner_adjacent_adjustable_hulls((&collider,&original_adjustable_hull), &all_colliders, &mut gizmos_debug);
+                let adjacents = with_corner_adjacent_adjustable_hulls((&collider,&original_adjustable_hull), &all_colliders/* , &mut gizmos_debug */);
 
 
 
@@ -96,7 +96,7 @@ pub fn modify_selected_attribute(
 
                 for origin_side in AdjHullSide::VARIANTS{
                     let Some(adjacent) = adjacents[*origin_side] else {continue;};
-                    gizmos_debug.to_display.push(GizmoDisplay::Cuboid(all_colliders[adjacent.0].0, Color::srgb_u8(255, 0, 255)));
+                    // gizmos_debug.to_display.push(GizmoDisplay::Cuboid(all_colliders[adjacent.0].0, Color::srgb_u8(255, 0, 255)));
                     // gizmos_debug.to_display.push(GizmoDisplay::Arrow(collider.translation,collider.translation+cuboid_face_normal(&collider, &adjacent.0), Color::srgb_u8(255, 0, 255)));
 
                     let mut adjacent_hull = all_parts.get_mut(all_colliders_entities[adjacent.0]).unwrap().1.unwrap();
