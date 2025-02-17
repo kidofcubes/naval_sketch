@@ -1,12 +1,9 @@
 use core::f32;
-use std::{collections::VecDeque, iter::once, ops::DerefMut};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::EventCursor, query}, gizmos::{self, aabb, primitives::dim3::Plane3dBuilder}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec2, Vec3, Vec3A}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoConfig, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Primitive3d, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{color::Color, math::{bounding::Aabb3d, Dir3, Quat, Ray3d, Vec3, Vec3A}, prelude::{Gizmos, InfinitePlane3d, Transform}, reflect::List, utils::HashMap};
 use enum_collections::{EnumMap, Enumerated};
-use regex::Regex;
-use smol_str::SmolStr;
 
-use crate::{editor::{DebugGizmo, GizmoDisplay}, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, Hovered, PartAttributes}, parsing::{AdjustableHull, BasePart}, parts::{get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::parsing::AdjustableHull;
 
 
 
@@ -15,7 +12,7 @@ pub fn dist_to_int(num: f32) -> f32{
 }
 
 fn in_rect(a_center: Vec3, a_axis1: Vec3, a_axis2: Vec3, check: Vec3, gizmo: &mut Gizmos) -> bool{
-    let diff = (check-a_center);
+    let diff = check-a_center;
     gizmo.arrow(a_center,check,Color::srgb_u8(0, 255, 0));
     gizmo.arrow(a_center,a_center+(diff.dot(a_axis1.normalize())*a_axis1.normalize()),Color::srgb_u8(255, 0, 0));
     gizmo.arrow(a_center,a_center+(diff.dot(a_axis2.normalize())*a_axis2.normalize()),Color::srgb_u8(255, 0, 0));
@@ -39,14 +36,14 @@ fn all_on_one_side(points: &[Vec3], center: Vec3, dir: Vec3/* , gizmo: &mut Gizm
 
     let boundary = dir.length();
 
-    let num = (points[0].dot(normalized_dir)-center_pos);
+    let num = points[0].dot(normalized_dir)-center_pos;
     //gizmo.arrow(center, center+(num*normalized_dir), Color::srgb_u8(255, 0, 0));
     if num.abs() <= boundary { return false; }
     let orig_side = num.signum();
 
 
     for point in &points[1..] {
-        let num = (point.dot(normalized_dir)-center_pos);
+        let num = point.dot(normalized_dir)-center_pos;
         //gizmo.arrow(center, center+(num*normalized_dir), Color::srgb_u8(255, 0, 0));
         if num.abs() < boundary { return false; }
         if num.signum()!=orig_side { return false; }
@@ -107,6 +104,7 @@ pub fn get_nearby<'a>(
     let mut faces :Vec<((Vec3,Vec3,Vec3),Vec3)> = Vec::with_capacity(6);
     for i in 0..6 {
         faces.push(cuboid_face(origin, i as u8));
+        nearby.insert(i,Vec::new());
     }
 
 
@@ -136,7 +134,7 @@ pub fn get_nearby<'a>(
                 let normal = face.0.0;
                 if (faces[i].0.0.normalize()+normal.normalize()).length() > 0.001 { continue; } 
 
-                let dist = ((check.translation-origin.translation).dot(faces[i].0.0.normalize()));
+                let dist = (check.translation-origin.translation).dot(faces[i].0.0.normalize());
                 if (dist-(normal.length()+faces[i].0.0.length())).abs() <= 3.0 {
                     //println!("the dist diff thing was {:?} - {:?}",dist,(normal.length()+faces[i].0.0.length()),);
                     //gizmo.cuboid(*check, Color::srgba_u8(255, 0, 0, 100));
@@ -164,9 +162,6 @@ pub fn get_nearby<'a>(
             }
         }
         for touched in touching {
-            if !nearby.contains_key(&touched.0) {
-                nearby.insert(touched.0,Vec::new());
-            }
             nearby.get_mut(&touched.0).unwrap().push((check_index,touched.1));
         }
 
@@ -262,12 +257,12 @@ pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3/* , draw_gizmo: bool, giz
                     // if(draw_gizmo){gizmo.line(*a_start, *a_end, Color::srgb_u8(255, 255, 0));}
                     // if(draw_gizmo){gizmo.line(*b_start, *b_end, Color::srgb_u8(0, 255, 255));}
                     //gizmo.arrow((a_start+a_end)/2.0, ((a_start+a_end)/2.0)+(dir.as_vec3()), Color::srgb_u8(0, 255, 255));
-                    let b_dir = (b_end-b_start);
+                    let b_dir = b_end-b_start;
                     let b_ray = Ray3d{ origin: *b_start, direction: Dir3::new_unchecked(b_dir.normalize())};
-                    let b_middle = ((b_end+b_start)/2.0);
+                    let b_middle = (b_end+b_start)/2.0;
                     //println!("b_start is {:?} b_middle is {:?}",b_start,b_middle);
                     // if(draw_gizmo){gizmo.arrow(*b_start, b_middle, Color::srgb_u8(255, 0, 255));}
-                    let a_dir = (a_end-a_start);
+                    let a_dir = a_end-a_start;
                     // println!("b_ray is {:?}",b_ray);
                     let a_plane_normal = Dir3::new_unchecked(dir.cross(a_dir).normalize());
                     // println!("dir is {:?} and the a_line dir is {:?}",dir,(a_end-a_start));
@@ -289,7 +284,7 @@ pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3/* , draw_gizmo: bool, giz
                     // if(draw_gizmo){gizmo.arrow(*a_start, hit_pos, Color::srgb_u8(255, 255, 255));}
                     // if(draw_gizmo){gizmo.arrow(*b_start, hit_pos, Color::srgb_u8(255, 255, 255));}
 
-                    let hit_offset = (hit_pos-a_start);
+                    let hit_offset = hit_pos-a_start;
 
                     let a_dir_dirs = a_dir.dot(dir.as_vec3());
                     let perp_a_dir = a_dir - (a_dir_dirs*dir.as_vec3());
@@ -318,7 +313,7 @@ pub fn to_touch_thing(a: &Thing, b: &Thing, dir: &Dir3/* , draw_gizmo: bool, giz
                     }
                     //println!("removing {:?} from {:?}hitoffset makes it",(hit_offset_perp_a_dirs*a_dir_dirs)*dir.as_vec3(),hit_offset);
                     //let all_dir = (hit_offset-(((hit_offset_perp_a_dirs/perp_a_dir.length())*a_dir_dirs)*dir.as_vec3()));
-                    let all_dir = (hit_offset-((hit_offset_perp_a_dirs/perp_a_dir.length())*a_dir));
+                    let all_dir = hit_offset-((hit_offset_perp_a_dirs/perp_a_dir.length())*a_dir);
                     //println!("all dir is {:?}",all_dir);
                     let moved_dist = all_dir.length();
                     
@@ -345,14 +340,14 @@ pub fn all_things(a :&Transform) -> Vec<Thing> {
     return things;
 }
 
-pub fn to_touch(a: &Transform, b: &Transform, mut dir: Dir3/* , gizmo: &mut Gizmos */) -> f32{
+pub fn to_touch(a: &Transform, b: &Transform, dir: Dir3/* , gizmo: &mut Gizmos */) -> f32{
     
     
     //let new_a = Transform::from_matrix(a.compute_matrix()*a.compute_matrix().inverse());
     // let new_a = Transform::IDENTITY;
     // let new_b = Transform::from_matrix(b.compute_matrix()*(a.compute_matrix().inverse()));
-    let mut new_a = a;
-    let mut new_b = b;
+    let new_a = a;
+    let new_b = b;
     // println!("the a is {:?} new its {:?}",a,new_a);
     // println!("the b is {:?} new its {:?}",b,new_b);
     // println!("");
@@ -427,7 +422,7 @@ pub fn cuboid_vertex(a: &Transform, i: u8) -> Vec3{
     return a.translation+(((a.back()*neg(i&4)*a.scale.z)+(a.up()*neg(i&2)*a.scale.y)+(a.right()*neg(i&1)*a.scale.x)));
 }
 pub fn cuboid_edge(a: &Transform, i: u8) -> (Vec3, Vec3){
-    match(i){
+    match i{
         0  => (cuboid_vertex(a, 0),cuboid_vertex(a, 1)), //left right
         1  => (cuboid_vertex(a, 2),cuboid_vertex(a, 3)),
         2  => (cuboid_vertex(a, 4),cuboid_vertex(a, 5)),
@@ -447,7 +442,7 @@ pub fn cuboid_edge(a: &Transform, i: u8) -> (Vec3, Vec3){
 }
 pub fn cuboid_face(a: &Transform, i: u8) -> ((Vec3,Vec3,Vec3), Vec3){
     let s = a.scale/2.0;
-    let dir = match(i){
+    let dir = match i{
         0 => {(*a.right()*s.x,*a.back()*s.z,*a.up()*s.y)}
         1 => {(*a.up()*s.y,*a.right()*s.x,*a.back()*s.z)}
         2 => {(*a.back()*s.z,*a.up()*s.y,*a.right()*s.x)}
@@ -477,7 +472,7 @@ fn pos_in_cuboid(a: &Vec3A, b: &Transform) -> bool {
 
 
 pub fn cuboid_face_normal(a: &Transform, i: &u8) -> Vec3 {
-    match(i){
+    match i{
         0 => *a.right(),
         1 => *a.up(),
         2 => *a.back(),
@@ -490,7 +485,7 @@ pub fn cuboid_face_normal(a: &Transform, i: &u8) -> Vec3 {
 }
 
 pub fn cuboid_scale(a: &Transform, i: &u8) -> f32{
-    match(i){
+    match i{
         0|3 => a.scale.x,
         1|4 => a.scale.y,
         2|5 => a.scale.z,
@@ -501,7 +496,7 @@ pub fn cuboid_scale(a: &Transform, i: &u8) -> f32{
 
 
 pub fn dir_from_index(i: &u8) -> Vec3 {
-    match(i){
+    match i{
         0 => *Dir3::X,
         1 => *Dir3::Y,
         2 => *Dir3::Z,
@@ -637,8 +632,8 @@ pub fn adjacent_adjustable_hulls(
         }
 
 
-        let vert_flipped = (check.down().distance_squared(*origin.up()) < f32::EPSILON*10.0);
-        let hori_flipped = (check.back().distance_squared(*origin.forward()) < f32::EPSILON*10.0);
+        let vert_flipped = check.down().distance_squared(*origin.up()) < f32::EPSILON*10.0;
+        let hori_flipped = check.back().distance_squared(*origin.forward()) < f32::EPSILON*10.0;
 
         if dist.dot(*origin.forward()).abs() > f32::EPSILON*10.0 { //ahead/behind
 

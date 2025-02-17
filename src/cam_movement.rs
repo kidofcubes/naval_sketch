@@ -1,5 +1,5 @@
-use bevy::{asset::RenderAssetUsages, color::Color, input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, math::DVec2, pbr::ScreenSpaceAmbientOcclusion, picking::focus::HoverMap, prelude::*, render::mesh::Indices, window::CursorGrabMode};
-use std::{env, f32::consts::FRAC_PI_2};
+use bevy::{input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, pbr::ScreenSpaceAmbientOcclusion, picking::focus::HoverMap, prelude::*};
+use std::f32::consts::FRAC_PI_2;
 
 /// A vector representing the player's input, accumulated over all frames that ran
 /// since the last time the physics simulation was advanced.
@@ -33,7 +33,7 @@ impl Plugin for CameraMovementPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_systems(Startup, spawn_player)
-            .add_systems(FixedUpdate, (advance_physics))
+            .add_systems(FixedUpdate, advance_physics)
             .add_systems(
                 // The `RunFixedMainLoop` schedule allows us to schedule systems to run before and after the fixed timestep loop.
                 RunFixedMainLoop,
@@ -55,7 +55,7 @@ impl Plugin for CameraMovementPlugin {
 
 /// Spawn the player sprite and a 2D camera.
 pub fn spawn_player(mut commands: Commands) {
-    let mut camera = Camera3d{
+    let camera = Camera3d{
             
             ..default()
         };
@@ -103,7 +103,7 @@ pub fn handle_input(
     /// one unit is one pixel, you can think of this as
     /// "How many pixels per second should the player move?"
     const SPEED: f32 = 100.0;
-    for (mut input, mut velocity, mut transform) in query.iter_mut() {
+    for (input, mut velocity, transform) in query.iter_mut() {
         // if keyboard_input.pressed(KeyCode::KeyW) {
         //     input.z -= 1.0;
         // }
@@ -160,7 +160,7 @@ pub fn advance_physics(
 
 pub fn interpolate_rendered_transform(
     fixed_time: Res<Time<Fixed>>,
-    mut query: Query<(
+    query: Query<(
         &mut Transform,
         &PhysicalTranslation,
         &PreviousPhysicalTranslation,
@@ -186,9 +186,9 @@ pub fn move_player(
     ui_nodes: Query<&Node>,
     windows: Query<&mut Window>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut player: Query<(&mut Transform), With<EditorCamera>>,
+    mut player: Query<&mut Transform, With<EditorCamera>>,
 ) {
-    let mut window = windows.single();
+    let window = windows.single();
     // if window.cursor_options.grab_mode != CursorGrabMode::Locked {
     //     return;
     // }
@@ -251,7 +251,7 @@ pub fn grab_mouse(
     mouse: Res<ButtonInput<MouseButton>>,
     key: Res<ButtonInput<KeyCode>>,
 ) {
-    let mut window = windows.single_mut();
+    let window = windows.single_mut();
 
     // if mouse.just_pressed(MouseButton::Middle) {
     //     window.cursor_options.visible = false;

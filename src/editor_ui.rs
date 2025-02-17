@@ -1,12 +1,12 @@
 use core::f32;
-use std::{fmt::Display, iter::once, ops::{Deref, DerefMut}, path::Path};
+use std::{fmt::Display, iter::once, path::Path};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, RenderAssetUsages}, color::{palettes::css::RED, Color, ColorToComponents, Luminance, Srgba}, core::Name, ecs::{event::{EventCursor, EventReader}, query::{self, Or}, schedule::IntoSystemConfigs, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Dir3, EulerRot, FromRng, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, ComputedCameraValues, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::{Msaa, RenderLayers}}, scene::ron::de, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, BorderColor, BorderRadius, FlexDirection, FlexWrap, GridPlacement, Node, Outline, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::{Or}, schedule::IntoSystemConfigs, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
+use bevy_egui::{egui::{self, Context, FontData, FontDefinitions, TextEdit, Vec2b}, EguiContexts};
 use enum_collections::{EnumMap, Enumerated};
-use rand::{rngs::{mock::StepRng, SmallRng, StdRng}, Rng, SeedableRng};
-use regex::Regex;
+use rand::{rngs::SmallRng, Rng, SeedableRng};
 
-use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_utils::{aabb_from_transform, adjacent_adjustable_hulls, cuboid_face, cuboid_face_normal, get_nearby, simple_closest_dist, transform_from_aabb, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, place_part, register_all_parts, unity_to_bevy_translation, BasePartMeshes, PartRegistry}};
+use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMeshes, PartAttributes, PartRegistry}};
 
 pub struct EditorUiPlugin;
 
@@ -15,6 +15,7 @@ impl Plugin for EditorUiPlugin {
         app.insert_resource(
             PropertiesDisplayData {
                 displays: EnumMap::new_option(),
+                properties_text_buffers: EnumMap::new(|| {"".to_string()}),
                 selected: PartAttributes::PositionX
             }
         );
@@ -27,10 +28,11 @@ impl Plugin for EditorUiPlugin {
                 trigger: Trigger<OnAdd, Selected>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>), With<Selected>>,
                 mut text_query: Query<&mut Text>,
-                display_properties: Res<PropertiesDisplayData>
+                mut display_properties: ResMut<PropertiesDisplayData>
             | {
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().collect();
-                update_display_text(&selected_parts, &mut text_query, &display_properties);
+                //update_display_text(&selected_parts, &mut text_query, &display_properties);
+                update_display_text(&selected_parts, &mut display_properties);
             }
         );
         app.add_observer(
@@ -38,15 +40,16 @@ impl Plugin for EditorUiPlugin {
                 trigger: Trigger<OnRemove, Selected>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>, Entity), With<Selected>>,
                 mut text_query: Query<&mut Text>,
-                display_properties: Res<PropertiesDisplayData>
+                mut display_properties: ResMut<PropertiesDisplayData>
             | {
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().filter_map(|part| {
                     if part.3 == trigger.entity() { None } else { Some((part.0,part.1,part.2)) }
                 }).collect();
-                update_display_text(&selected_parts, &mut text_query, &display_properties);
+                //update_display_text(&selected_parts, &mut text_query, &display_properties);
+                update_display_text(&selected_parts, &mut display_properties);
             }
         );
-        app.add_systems(Startup, (spawn_ui.after(register_all_parts).after(spawn_player)));
+        app.add_systems(Startup, spawn_ui.after(register_all_parts).after(spawn_player));
         app.add_systems(Update, (on_part_display_changed,update_scroll_position));
         app.insert_resource(
             CommandDisplayData {
@@ -58,8 +61,86 @@ impl Plugin for EditorUiPlugin {
                 history_text_display: None,
             }
         );
+        app.add_systems(Startup, setup_ui);
+        app.add_systems(Update, ui_example_system);
+        app.insert_resource(TestData { text: "".to_owned() } );
     }
 }
+
+
+#[derive(Resource)]
+pub struct TestData {
+    pub text: String,
+}
+fn setup_ui(
+    mut contexts: EguiContexts,
+){
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert("my_font".to_owned(),
+       std::sync::Arc::new(
+           // .ttf and .otf supported
+           FontData::from_static(include_bytes!("/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc"))
+       )
+    );
+    fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap()
+    .insert(0, "my_font".to_owned());
+
+    contexts.ctx_mut().set_fonts(fonts);
+
+
+    //Context::set_fonts(, font_definitions);
+
+}
+
+
+fn ui_example_system(
+    mut contexts: EguiContexts,
+    mut test_data: ResMut<TestData>,
+    mut all_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>, Option<&mut Turret>, Entity)>,
+    selected: Query<Entity, With<Selected>>,
+    mut display_properties: ResMut<PropertiesDisplayData>
+) {
+    contexts.ctx_mut().memory(|mem|{
+        match mem.focused() {
+            Some(focused) => {
+            },
+            None => {},
+        }
+
+    });
+
+    
+
+    egui::Window::new("Part Properties")
+        .resizable(Vec2b::new(false,false))
+        // .max_width(f32::MAX)
+        // .max_height(f32::MAX)
+        .show(contexts.ctx_mut(), |ui| {
+            
+
+            for attr in PartAttributes::VARIANTS {
+                //properties_display_data.displays[*attr]=Some(attribute_editor(parent, *attr, font.clone()));
+                ui.horizontal(|ui| {
+                    ui.label(attr.to_string());
+                    let text_box = ui.add(TextEdit::singleline(&mut display_properties.properties_text_buffers[*attr]));
+                    if display_properties.is_changed() {
+
+                    }
+                    if(text_box.changed()){
+                        //println!("CHANGED IT TO {}",test_data.text);
+                        if attr.is_number() {
+                            for selected_entity in &selected {
+
+                            }
+                        }
+                    }
+                });
+            }
+            
+        });
+}
+
+
 
 
 #[derive(Resource)]
@@ -75,6 +156,7 @@ pub struct CommandDisplayData {
 #[derive(Resource)]
 pub struct PropertiesDisplayData {
     pub displays: EnumMap<PartAttributes,Option<Entity>,{PartAttributes::SIZE}>, 
+    pub properties_text_buffers: EnumMap<PartAttributes,String,{PartAttributes::SIZE}>, 
     pub selected: PartAttributes,
 }
 
@@ -198,7 +280,7 @@ pub fn spawn_ui(
         Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.0,0.0,0.0)),
     )); //???
     
-    let mut part_offset = Vec3::new(0.0,0.0,0.0);
+    let part_offset = Vec3::new(0.0,0.0,0.0);
     // for part in &part_registry.parts {
     //     //println!("PARTS ARE {:?}",part_registry.parts.len());
     //     let mut display_part = commands.spawn((
@@ -421,192 +503,6 @@ fn on_part_display_changed(
     }
 }
 
-#[derive(Enumerated, PartialEq, Debug, Copy, Clone)]
-pub enum PartAttributes {
-    //BasePart
-    Id,
-    IgnorePhysics,
-    PositionX,
-    PositionY,
-    PositionZ,
-    RotationX,
-    RotationY,
-    RotationZ,
-    ScaleX,
-    ScaleY,
-    ScaleZ,
-    Color,
-    Armor,
-    //AdjustableHull
-    Length,
-    Height,
-    FrontWidth,
-    BackWidth,
-    FrontSpread,
-    BackSpread,
-    TopRoundness,
-    BottomRoundness,
-    HeightScale,
-    HeightOffset,
-    //Turret
-    ManualControl,
-    Elevator
-}
-impl PartAttributes {
-    pub fn is_number(&self) -> bool{
-        match self {
-            PartAttributes::Id => true,
-            PartAttributes::IgnorePhysics => false,
-            PartAttributes::Color => false,
-            PartAttributes::ManualControl => false,
-            _ => true
-        }
-    }
-    pub fn is_adjustable_hull(&self) -> bool{
-        match self {
-            PartAttributes::Length => true,
-            PartAttributes::Height => true,
-            PartAttributes::FrontWidth => true,
-            PartAttributes::BackWidth => true,
-            PartAttributes::FrontSpread => true,
-            PartAttributes::BackSpread => true,
-            PartAttributes::TopRoundness => true,
-            PartAttributes::BottomRoundness => true,
-            PartAttributes::HeightScale => true,
-            PartAttributes::HeightOffset => true,
-            _ => false
-        }
-    }
-
-    pub fn get_field(&self, base_part: &BasePart, adjustable_hull: Option<&AdjustableHull>, turret: Option<&Turret>) -> Option<String>{
-        let mut string: Option<String> = None;
-
-        string = match self {
-            PartAttributes::Id => Some(base_part.id.to_string()),
-            PartAttributes::IgnorePhysics => Some(base_part.ignore_physics.to_string()),
-            PartAttributes::PositionX => Some(base_part.position.x.to_string()),
-            PartAttributes::PositionY => Some(base_part.position.y.to_string()),
-            PartAttributes::PositionZ => Some(base_part.position.z.to_string()),
-            PartAttributes::RotationX => Some(base_part.rotation.x.to_string()),
-            PartAttributes::RotationY => Some(base_part.rotation.y.to_string()),
-            PartAttributes::RotationZ => Some(base_part.rotation.z.to_string()),
-            PartAttributes::ScaleX => Some(base_part.scale.x.to_string()),
-            PartAttributes::ScaleY => Some(base_part.scale.y.to_string()),
-            PartAttributes::ScaleZ => Some(base_part.scale.z.to_string()),
-            PartAttributes::Color => Some(base_part.color.to_srgba().to_hex()),
-            PartAttributes::Armor => Some(base_part.armor.to_string()),
-            _ => None
-        };
-        if string.is_some() { return string };
-
-
-        if let Some(adjustable_hull) = adjustable_hull {
-            string = match self {
-                PartAttributes::Length => Some(adjustable_hull.length.to_string()),
-                PartAttributes::Height => Some(adjustable_hull.height.to_string()),
-                PartAttributes::FrontWidth => Some(adjustable_hull.front_width.to_string()),
-                PartAttributes::BackWidth => Some(adjustable_hull.back_width.to_string()),
-                PartAttributes::FrontSpread => Some(adjustable_hull.front_spread.to_string()),
-                PartAttributes::BackSpread => Some(adjustable_hull.back_spread.to_string()),
-                PartAttributes::TopRoundness => Some(adjustable_hull.top_roundness.to_string()),
-                PartAttributes::BottomRoundness => Some(adjustable_hull.bottom_roundness.to_string()),
-                PartAttributes::HeightScale => Some(adjustable_hull.height_scale.to_string()),
-                PartAttributes::HeightOffset => Some(adjustable_hull.height_offset.to_string()),
-                _ => None
-            };
-            if string.is_some() { return string };
-        }
-
-
-        if let Some(turret) = turret {
-            string = match self {
-                PartAttributes::ManualControl=> Some(turret.manual_control.to_string()),
-                PartAttributes::Elevator => Some(turret.elevator.unwrap_or(0.0).to_string()),
-                _ => None
-            };
-            if string.is_some() { return string };
-        }
-
-        return string;
-    }
-    pub fn set_field(&self, base_part: Option<&mut BasePart>, adjustable_hull: Option<&mut AdjustableHull>, turret: Option<&mut Turret>, text: &str) -> Result<(),Box<dyn std::error::Error>>{
-        if let Some(base_part) = base_part {
-            match self {
-                PartAttributes::Id => {base_part.id = text.parse()?},
-                PartAttributes::IgnorePhysics => {base_part.id = text.parse()?},
-                PartAttributes::PositionX => {base_part.position.x = text.parse()?},
-                PartAttributes::PositionY => {base_part.position.y = text.parse()?},
-                PartAttributes::PositionZ => {base_part.position.z = text.parse()?},
-                PartAttributes::RotationX => {base_part.rotation.x = text.parse()?},
-                PartAttributes::RotationY => {base_part.rotation.y = text.parse()?},
-                PartAttributes::RotationZ => {base_part.rotation.z = text.parse()?},
-                PartAttributes::ScaleX => {base_part.scale.x = text.parse()?},
-                PartAttributes::ScaleY => {base_part.scale.y = text.parse()?},
-                PartAttributes::ScaleZ => {base_part.scale.z = text.parse()?},
-                PartAttributes::Color => {base_part.color = Color::Srgba(Srgba::hex(text)?)},
-                PartAttributes::Armor => {base_part.armor = text.parse()?},
-                _ => {}
-            }
-        }
-
-        if let Some(adjustable_hull) = adjustable_hull {
-            match self {
-                PartAttributes::Length => adjustable_hull.length = text.parse()?,
-                PartAttributes::Height => adjustable_hull.height = text.parse()?,
-                PartAttributes::FrontWidth => adjustable_hull.front_width = text.parse()?,
-                PartAttributes::BackWidth => adjustable_hull.back_width = text.parse()?,
-                PartAttributes::FrontSpread => adjustable_hull.front_spread = text.parse()?,
-                PartAttributes::BackSpread => adjustable_hull.back_spread = text.parse()?,
-                PartAttributes::TopRoundness => adjustable_hull.top_roundness = text.parse()?,
-                PartAttributes::BottomRoundness => adjustable_hull.bottom_roundness = text.parse()?,
-                PartAttributes::HeightScale => adjustable_hull.height_scale = text.parse()?,
-                PartAttributes::HeightOffset => adjustable_hull.height_offset = text.parse()?,
-                _ => {}
-            };
-        }
-
-        if let Some(turret) = turret{
-            match self {
-                PartAttributes::ManualControl => turret.manual_control = text.parse()?,
-                PartAttributes::Elevator => turret.elevator = Some(text.parse()?),
-                _ => {}
-            }
-        };
-
-        return Ok(());
-    }
-}
-impl Display for PartAttributes {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"{}",match self {
-            PartAttributes::Id => "Id",
-            PartAttributes::IgnorePhysics => "IgnorePhysics",
-            PartAttributes::PositionX => "Position|位置 X",
-            PartAttributes::PositionY => "Position|位置 Y",
-            PartAttributes::PositionZ => "Position|位置 Z",
-            PartAttributes::RotationX => "Rotation|旋转 X",
-            PartAttributes::RotationY => "Rotation|旋转 Y",
-            PartAttributes::RotationZ => "Rotation|旋转 Z",
-            PartAttributes::ScaleX => "Scale|尺度 X",
-            PartAttributes::ScaleY => "Scale|尺度 Y",
-            PartAttributes::ScaleZ => "Scale|尺度 Z",
-            PartAttributes::Color => "Color|颜色",
-            PartAttributes::Armor => "Armor|装甲",
-            PartAttributes::Length => "Length|长度",
-            PartAttributes::Height => "Height|高度",
-            PartAttributes::FrontWidth => "ForwardWidth|前段宽度",
-            PartAttributes::BackWidth => "BackwardWidth|后段宽度",
-            PartAttributes::FrontSpread => "ForwardSpread|前段扩散",
-            PartAttributes::BackSpread => "BackwardSpread|后段扩散",
-            PartAttributes::TopRoundness => "TopRoundness|上表面弧度",
-            PartAttributes::BottomRoundness => "BottomRoundness|下表面弧度",
-            PartAttributes::HeightScale => "HeightScale|高度缩放",
-            PartAttributes::HeightOffset => "HeightOffset|高度偏移",
-            PartAttributes::ManualControl => "ManualControl",
-            PartAttributes::Elevator => "Elevator",
-        })
-    }
-}
 
 
 fn attribute_editor(parent: &mut ChildBuilder, attribute: PartAttributes, font: TextFont) -> Entity{
@@ -639,7 +535,7 @@ pub fn render_gizmos(
     command_data: Res<CommandData>,
     editor_data: Res<EditorData>,
     display_properties: Res<PropertiesDisplayData>,
-    mut selected: Query<Entity, With<Selected>>,
+    selected: Query<Entity, With<Selected>>,
     //all_parts: Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
     all_parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>, Entity)>,
     // hovered: Query<(&BasePart,Option<&AdjustableHull>),With<Hovered>>,
@@ -714,7 +610,7 @@ pub fn render_gizmos(
 
             let dir_nearbys = get_nearby(&selected_bounding_box, &other_parts,false,false /* ,&mut gizmos */);
 
-            let mut possible_positions: HashMap<u8,Vec<f32>> = HashMap::new();
+            let possible_positions: HashMap<u8,Vec<f32>> = HashMap::new();
 
             for i in 0..6 as u8 {
                 let selected_shared_face = cuboid_face(&selected_bounding_box,i);
@@ -730,7 +626,7 @@ pub fn render_gizmos(
                     //gizmo.cuboid(*nearby.0,Color::srgb_u8(0, 255, 255));
 
                     let face = cuboid_face(nearby_transform, nearby.1);
-                    let mut dotted_dist = (face.1-selected_shared_face.1);
+                    let mut dotted_dist = face.1-selected_shared_face.1;
                     dotted_dist = dotted_dist - (dotted_dist.dot(selected_shared_face.0.0.normalize())*selected_shared_face.0.0.normalize());
                     
                         
@@ -743,7 +639,7 @@ pub fn render_gizmos(
                         let mut thing = Isometry3d::from_translation(face.1-dotted_dist);
                         thing.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, face.0.0.normalize());
 
-                        let color = match((nearby.1+(j*3))%6) {
+                        let color = match (nearby.1+(j*3))%6 {
                             0|3 => Color::srgb_u8(255, 0, 0),
                             1|4 => Color::srgb_u8(0, 255, 0),
                             2|5 => Color::srgb_u8(0, 0, 255),
@@ -764,13 +660,215 @@ pub fn render_gizmos(
 
 
 
+
+
+pub fn get_base_part_entity(parent_query: &Query<&Parent>, part_query: &Query<&BasePart>, entity: Entity) -> Option<Entity>{
+    // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
+    for base_entity in once(entity).chain(parent_query.iter_ancestors(entity)) {
+        if part_query.get(base_entity).is_ok() {
+            return Some(base_entity);
+        }
+    };
+    return None;
+}
+
+pub fn update_selected(
+    children_query: Query<&Children>,
+    material_query: Query<Entity, With<Mesh3d>>,
+    added: Query<Entity, (With<BasePart>, Added<Selected>)>,
+    mut removed: RemovedComponents<Selected>,
+    commands: Commands,
+){
+    removed.read().for_each(|base_entity| {
+        for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
+            if material_query.contains(entity) {
+                //commands.entity(entity).remove::<OutlineVolume>();
+            }
+        }
+    });
+
+    for base_entity in &added {
+        for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
+            if material_query.contains(entity) {
+                // commands.entity(entity).insert(
+                //     OutlineVolume {
+                //         visible: true,
+                //         width: 5.0,
+                //         colour: Color::srgba_u8(0, 255, 0, 255),
+                //         ..default()
+                //     }
+                // );
+            }
+        }
+    }
+}
+
+pub fn on_part_changed(
+    mut changed_base_part: Query<(&mut Transform, Entity), Or<(Changed<BasePart>,Changed<AdjustableHull>,Changed<Turret>)>>,
+    //parts: Query<(Ref<BasePart>, Option<Ref<AdjustableHull>>, Option<Ref<Turret>>)>,
+    parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)>,
+    base_part_meshes: Query<&BasePartMeshes>,
+    selected: Query<Entity, With<Selected>>,
+    mut text_query: Query<&mut Text>,
+    mut display_properties: ResMut<PropertiesDisplayData>,
+
+    mut meshes_query: Query<(&mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+){
+    let mut has_changed = false;
+    for mut pair in &mut changed_base_part {
+        //println!("THE THING CHANGED OH MAI GAH {:?}",pair);
+        let new_transform =
+            base_part_to_bevy_transform(&parts.get(pair.1).unwrap().0);
+        pair.0.translation = new_transform.translation;
+        pair.0.rotation = new_transform.rotation;
+        pair.0.scale = new_transform.scale;
+        has_changed = true;
+
+        if let Some(adjustable_hull) = parts.get(pair.1).unwrap().1 {
+            let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD);
+            
+            generate_adjustable_hull_mesh(
+                &mut mesh,
+                adjustable_hull
+            );
+
+            meshes_query.get_mut(pair.1).unwrap().0.0 = meshes.add(mesh);
+        }
+
+        if let Ok(part_meshes) = base_part_meshes.get(pair.1) {
+            for mesh_entity in &part_meshes.meshes {
+                meshes_query.get_mut(*mesh_entity).unwrap().1.0 = materials.add(parts.get(pair.1).unwrap().0.color);
+            }
+        }
+    }
+    if !has_changed {return;}
+
+    let mut selected_parts = Vec::with_capacity(selected.iter().len());
+    for selected_part in &selected {
+        selected_parts.push(parts.get(selected_part).unwrap());
+    }
+
+    //update_display_text(&selected_parts, &mut text_query, &display_properties);
+    update_display_text(&selected_parts, &mut display_properties);
+}
+
+
+pub fn update_display_text(
+    parts: &[(&BasePart, Option<&AdjustableHull>, Option<&Turret>)],
+    //text_query: &mut Query<&mut Text>,
+    display_properties: &mut ResMut<PropertiesDisplayData>
+){
+    // let mut update_properties_text = false;
+    // for selected in &selected {
+    //     if changed_base_part.contains(selected) {
+    //         update_properties_text = true;
+    //         break;
+    //     }
+    // }
+    // if update_properties_text {
+        let mut selected_properties: EnumMap<PartAttributes,Vec<String>,{PartAttributes::SIZE}> = EnumMap::new_default();
+        for attr in PartAttributes::VARIANTS {
+            selected_properties[*attr] = Vec::new();
+        }
+
+        for part in parts {
+            for attr in PartAttributes::VARIANTS {
+                if let Some(string) = attr.get_field(part.0, part.1, part.2) {
+                    selected_properties[*attr].push(string);
+                }
+            }
+        }
+
+        for attr in PartAttributes::VARIANTS {
+            display_properties.properties_text_buffers[*attr] = recompute_display_text(&selected_properties[*attr]);
+        }
+
+    //}
+
+    // let mut selected_properties: EnumMap<PartAttributes,Vec<String>,{PartAttributes::SIZE}> = EnumMap::new_default();
+    // for attr in PartAttributes::VARIANTS {
+    //     selected_properties[*attr] = Vec::new();
+    // }
+    //
+    // for part in parts {
+    //     for attr in PartAttributes::VARIANTS {
+    //         if let Some(string) = attr.get_field(part.0, part.1, part.2) {
+    //             selected_properties[*attr].push(string);
+    //         }
+    //     }
+    // }
+    //
+    // for attr in PartAttributes::VARIANTS {
+    //     //if !selected_properties[*attr].is_empty() {
+    //     text_query.get_mut(display_properties.displays[*attr].unwrap()).unwrap().0 = format!("{:?}: {}",attr,recompute_display_text(&selected_properties[*attr]));
+    //     //}
+    // }
+
+
+}
+
+
+
+fn recompute_display_text(values: &Vec<String>) -> String {
+    if values.is_empty() { return "???".to_owned(); }
+    let orig = values.first().unwrap();
+    for check in values {
+        if orig!=check {
+            return "XXX".to_owned();
+        }
+    }
+    return orig.to_owned();
+}
+
+
+
+
+pub fn update_command_text(
+    command_data: Res<CommandData>,
+    command_display_data: Res<CommandDisplayData>,
+    mut text_query: Query<&mut Text>,
+    mut node_query: Query<&mut Node>,
+){
+    if command_data.is_changed()  {
+        text_query.get_mut(command_display_data.input_text_display.unwrap()).unwrap().0 =
+            String::from_utf8(command_data.current_command.clone()).unwrap();
+        // println!("text_display is {:?}",command_display_data.text_display);
+        // println!("text_query is {:?}",text_query.get_mut(command_display_data.text_display.unwrap()));
+        // println!("flasher is {:?}",command_display_data.flasher);
+        // println!("node_query is {:?}",node_query.get_mut(command_display_data.flasher.unwrap()));
+
+        node_query.get_mut(command_display_data.flasher.unwrap()).unwrap().left =
+            Val::Px(command_display_data.font_width * command_display_data.mult * (command_data.current_byte_index as f32));
+
+        let mut history_text = String::new();
+
+
+        let mut count = 0;
+        for command in &command_data.command_history {
+            history_text.push_str(command);
+            history_text.push_str(" ");
+
+            count+=1;
+            if count >= 100 {
+                break;
+            }
+        }
+
+        
+
+        text_query.get_mut(command_display_data.history_text_display.unwrap()).unwrap().0 =history_text;
+    }
+}
+
 pub fn on_click(
     click: Trigger<Pointer<Down>>,
     part_query: Query<&BasePart>,
     parent_query: Query<&Parent>,
     children_query: Query<&Children>,
-    mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
+    materials: ResMut<Assets<StandardMaterial>>,
     selected: Query<Entity, With<Selected>>,
     key: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
@@ -841,177 +939,3 @@ pub fn on_unhover(
         }
     };
 }
-
-pub fn get_base_part_entity(parent_query: &Query<&Parent>, part_query: &Query<&BasePart>, entity: Entity) -> Option<Entity>{
-    // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
-    for base_entity in once(entity).chain(parent_query.iter_ancestors(entity)) {
-        if part_query.get(base_entity).is_ok() {
-            return Some(base_entity);
-        }
-    };
-    return None;
-}
-
-pub fn update_selected(
-    children_query: Query<&Children>,
-    material_query: Query<Entity, With<Mesh3d>>,
-    added: Query<Entity, (With<BasePart>, Added<Selected>)>,
-    mut removed: RemovedComponents<Selected>,
-    mut commands: Commands,
-){
-    removed.read().for_each(|base_entity| {
-        for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
-            if material_query.contains(entity) {
-                //commands.entity(entity).remove::<OutlineVolume>();
-            }
-        }
-    });
-
-    for base_entity in &added {
-        for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
-            if material_query.contains(entity) {
-                // commands.entity(entity).insert(
-                //     OutlineVolume {
-                //         visible: true,
-                //         width: 5.0,
-                //         colour: Color::srgba_u8(0, 255, 0, 255),
-                //         ..default()
-                //     }
-                // );
-            }
-        }
-    }
-}
-
-pub fn on_part_changed(
-    mut changed_base_part: Query<(&mut Transform, Entity), Or<(Changed<BasePart>,Changed<AdjustableHull>,Changed<Turret>)>>,
-    //parts: Query<(Ref<BasePart>, Option<Ref<AdjustableHull>>, Option<Ref<Turret>>)>,
-    parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)>,
-    base_part_meshes: Query<&BasePartMeshes>,
-    selected: Query<Entity, With<Selected>>,
-    mut text_query: Query<&mut Text>,
-    display_properties: Res<PropertiesDisplayData>,
-
-    mut meshes_query: Query<(&mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-){
-    let mut has_changed = false;
-    for mut pair in &mut changed_base_part {
-        //println!("THE THING CHANGED OH MAI GAH {:?}",pair);
-        let new_transform =
-            base_part_to_bevy_transform(&parts.get(pair.1).unwrap().0);
-        pair.0.translation = new_transform.translation;
-        pair.0.rotation = new_transform.rotation;
-        pair.0.scale = new_transform.scale;
-        has_changed = true;
-
-        if let Some(adjustable_hull) = parts.get(pair.1).unwrap().1 {
-            let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD);
-            
-            generate_adjustable_hull_mesh(
-                &mut mesh,
-                adjustable_hull
-            );
-
-            meshes_query.get_mut(pair.1).unwrap().0.0 = meshes.add(mesh);
-        }
-
-        if let Ok(part_meshes) = base_part_meshes.get(pair.1) {
-            for mesh_entity in &part_meshes.meshes {
-                meshes_query.get_mut(*mesh_entity).unwrap().1.0 = materials.add(parts.get(pair.1).unwrap().0.color);
-            }
-        }
-    }
-    if !has_changed {return;}
-
-    let mut selected_parts = Vec::with_capacity(selected.iter().len());
-    for selected_part in &selected {
-        selected_parts.push(parts.get(selected_part).unwrap());
-    }
-
-    update_display_text(&selected_parts, &mut text_query, &display_properties);
-}
-
-
-pub fn update_display_text(
-    parts: &[(&BasePart, Option<&AdjustableHull>, Option<&Turret>)],
-    text_query: &mut Query<&mut Text>,
-    display_properties: &Res<PropertiesDisplayData>
-){
-
-    let mut selected_properties: EnumMap<PartAttributes,Vec<String>,{PartAttributes::SIZE}> = EnumMap::new_default();
-    for attr in PartAttributes::VARIANTS {
-        selected_properties[*attr] = Vec::new();
-    }
-
-    for part in parts {
-        for attr in PartAttributes::VARIANTS {
-            if let Some(string) = attr.get_field(part.0, part.1, part.2) {
-                selected_properties[*attr].push(string);
-            }
-        }
-    }
-
-    for attr in PartAttributes::VARIANTS {
-        //if !selected_properties[*attr].is_empty() {
-        text_query.get_mut(display_properties.displays[*attr].unwrap()).unwrap().0 = format!("{:?}: {}",attr,recompute_display_text(&selected_properties[*attr]));
-        //}
-    }
-
-
-}
-
-
-
-fn recompute_display_text(values: &Vec<String>) -> String {
-    if values.is_empty() { return "???".to_owned(); }
-    let orig = values.first().unwrap();
-    for check in values {
-        if orig!=check {
-            return "XXX".to_owned();
-        }
-    }
-    return orig.to_owned();
-}
-
-
-
-
-pub fn update_command_text(
-    command_data: Res<CommandData>,
-    command_display_data: Res<CommandDisplayData>,
-    mut text_query: Query<&mut Text>,
-    mut node_query: Query<&mut Node>,
-){
-    if command_data.is_changed()  {
-        text_query.get_mut(command_display_data.input_text_display.unwrap()).unwrap().0 =
-            String::from_utf8(command_data.current_command.clone()).unwrap();
-        // println!("text_display is {:?}",command_display_data.text_display);
-        // println!("text_query is {:?}",text_query.get_mut(command_display_data.text_display.unwrap()));
-        // println!("flasher is {:?}",command_display_data.flasher);
-        // println!("node_query is {:?}",node_query.get_mut(command_display_data.flasher.unwrap()));
-
-        node_query.get_mut(command_display_data.flasher.unwrap()).unwrap().left =
-            Val::Px(command_display_data.font_width * command_display_data.mult * (command_data.current_byte_index as f32));
-
-        let mut history_text = String::new();
-
-
-        let mut count = 0;
-        for command in &command_data.command_history {
-            history_text.push_str(command);
-            history_text.push_str(" ");
-
-            count+=1;
-            if count >= 100 {
-                break;
-            }
-        }
-
-        
-
-        text_query.get_mut(command_display_data.history_text_display.unwrap()).unwrap().0 =history_text;
-    }
-}
-

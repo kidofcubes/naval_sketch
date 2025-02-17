@@ -1,9 +1,11 @@
-use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::{mesh::{Extrudable, Indices}, view::RenderLayers}, utils::HashMap, window::CursorGrabMode};
+use std::{fmt::Display, iter::once, ops::Deref, path::Path};
+use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, prelude::*, reflect::List, render::{mesh::Indices, view::RenderLayers}, utils::HashMap};
 use dirs::cache_dir;
-use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text}, editor_ui::get_base_part_entity};
-use crate::parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
+use enum_collections::Enumerated;
+use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, editor::Selected, editor_ui::get_base_part_entity, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret};
+use crate::parsing::{AdjustableHull, BasePart, HasBasePart, Part};
 use core::f32;
-use std::{fs::create_dir_all, path::{Path, PathBuf}};
+use std::{fs::create_dir_all, path::PathBuf};
 
 
 #[derive(Resource)]
@@ -340,4 +342,366 @@ pub fn bevy_to_unity_translation(pos: &Vec3) -> Vec3{
     let mut new_pos = pos.clone();
     new_pos.x=-new_pos.x;
     return new_pos;
+}
+
+
+#[derive(Enumerated, PartialEq, Debug, Copy, Clone)]
+pub enum PartAttributes {
+    //BasePart
+    Id,
+    IgnorePhysics,
+    PositionX,
+    PositionY,
+    PositionZ,
+    RotationX,
+    RotationY,
+    RotationZ,
+    ScaleX,
+    ScaleY,
+    ScaleZ,
+    Color,
+    Armor,
+    //AdjustableHull
+    Length,
+    Height,
+    FrontWidth,
+    BackWidth,
+    FrontSpread,
+    BackSpread,
+    TopRoundness,
+    BottomRoundness,
+    HeightScale,
+    HeightOffset,
+    //Turret
+    ManualControl,
+    Elevator
+}
+impl PartAttributes {
+    pub fn is_number(&self) -> bool{
+        match self {
+            PartAttributes::Id => true,
+            PartAttributes::IgnorePhysics => false,
+            PartAttributes::Color => false,
+            PartAttributes::ManualControl => false,
+            _ => true
+        }
+    }
+    pub fn is_adjustable_hull(&self) -> bool{
+        match self {
+            PartAttributes::Length => true,
+            PartAttributes::Height => true,
+            PartAttributes::FrontWidth => true,
+            PartAttributes::BackWidth => true,
+            PartAttributes::FrontSpread => true,
+            PartAttributes::BackSpread => true,
+            PartAttributes::TopRoundness => true,
+            PartAttributes::BottomRoundness => true,
+            PartAttributes::HeightScale => true,
+            PartAttributes::HeightOffset => true,
+            _ => false
+        }
+    }
+
+    pub fn get_field(&self, base_part: &BasePart, adjustable_hull: Option<&AdjustableHull>, turret: Option<&Turret>) -> Option<String>{
+        let mut string: Option<String> = None;
+
+        string = match self {
+            PartAttributes::Id => Some(base_part.id.to_string()),
+            PartAttributes::IgnorePhysics => Some(base_part.ignore_physics.to_string()),
+            PartAttributes::PositionX => Some(base_part.position.x.to_string()),
+            PartAttributes::PositionY => Some(base_part.position.y.to_string()),
+            PartAttributes::PositionZ => Some(base_part.position.z.to_string()),
+            PartAttributes::RotationX => Some(base_part.rotation.x.to_string()),
+            PartAttributes::RotationY => Some(base_part.rotation.y.to_string()),
+            PartAttributes::RotationZ => Some(base_part.rotation.z.to_string()),
+            PartAttributes::ScaleX => Some(base_part.scale.x.to_string()),
+            PartAttributes::ScaleY => Some(base_part.scale.y.to_string()),
+            PartAttributes::ScaleZ => Some(base_part.scale.z.to_string()),
+            PartAttributes::Color => Some(base_part.color.to_srgba().to_hex()),
+            PartAttributes::Armor => Some(base_part.armor.to_string()),
+            _ => None
+        };
+        if string.is_some() { return string };
+
+
+        if let Some(adjustable_hull) = adjustable_hull {
+            string = match self {
+                PartAttributes::Length => Some(adjustable_hull.length.to_string()),
+                PartAttributes::Height => Some(adjustable_hull.height.to_string()),
+                PartAttributes::FrontWidth => Some(adjustable_hull.front_width.to_string()),
+                PartAttributes::BackWidth => Some(adjustable_hull.back_width.to_string()),
+                PartAttributes::FrontSpread => Some(adjustable_hull.front_spread.to_string()),
+                PartAttributes::BackSpread => Some(adjustable_hull.back_spread.to_string()),
+                PartAttributes::TopRoundness => Some(adjustable_hull.top_roundness.to_string()),
+                PartAttributes::BottomRoundness => Some(adjustable_hull.bottom_roundness.to_string()),
+                PartAttributes::HeightScale => Some(adjustable_hull.height_scale.to_string()),
+                PartAttributes::HeightOffset => Some(adjustable_hull.height_offset.to_string()),
+                _ => None
+            };
+            if string.is_some() { return string };
+        }
+
+
+        if let Some(turret) = turret {
+            string = match self {
+                PartAttributes::ManualControl=> Some(turret.manual_control.to_string()),
+                PartAttributes::Elevator => Some(turret.elevator.unwrap_or(0.0).to_string()),
+                _ => None
+            };
+            if string.is_some() { return string };
+        }
+
+        return string;
+    }
+    pub fn set_field(&self, base_part: Option<&mut BasePart>, adjustable_hull: Option<&mut AdjustableHull>, turret: Option<&mut Turret>, text: &str) -> Result<(),Box<dyn std::error::Error>>{
+        if let Some(base_part) = base_part {
+            match self {
+                PartAttributes::Id => {base_part.id = text.parse()?},
+                PartAttributes::IgnorePhysics => {base_part.id = text.parse()?},
+                PartAttributes::PositionX => {base_part.position.x = text.parse()?},
+                PartAttributes::PositionY => {base_part.position.y = text.parse()?},
+                PartAttributes::PositionZ => {base_part.position.z = text.parse()?},
+                PartAttributes::RotationX => {base_part.rotation.x = text.parse()?},
+                PartAttributes::RotationY => {base_part.rotation.y = text.parse()?},
+                PartAttributes::RotationZ => {base_part.rotation.z = text.parse()?},
+                PartAttributes::ScaleX => {base_part.scale.x = text.parse()?},
+                PartAttributes::ScaleY => {base_part.scale.y = text.parse()?},
+                PartAttributes::ScaleZ => {base_part.scale.z = text.parse()?},
+                PartAttributes::Color => {base_part.color = Color::Srgba(Srgba::hex(text)?)},
+                PartAttributes::Armor => {base_part.armor = text.parse()?},
+                _ => {}
+            }
+        }
+
+        if let Some(adjustable_hull) = adjustable_hull {
+            match self {
+                PartAttributes::Length => adjustable_hull.length = text.parse()?,
+                PartAttributes::Height => adjustable_hull.height = text.parse()?,
+                PartAttributes::FrontWidth => adjustable_hull.front_width = text.parse()?,
+                PartAttributes::BackWidth => adjustable_hull.back_width = text.parse()?,
+                PartAttributes::FrontSpread => adjustable_hull.front_spread = text.parse()?,
+                PartAttributes::BackSpread => adjustable_hull.back_spread = text.parse()?,
+                PartAttributes::TopRoundness => adjustable_hull.top_roundness = text.parse()?,
+                PartAttributes::BottomRoundness => adjustable_hull.bottom_roundness = text.parse()?,
+                PartAttributes::HeightScale => adjustable_hull.height_scale = text.parse()?,
+                PartAttributes::HeightOffset => adjustable_hull.height_offset = text.parse()?,
+                _ => {}
+            };
+        }
+
+        if let Some(turret) = turret{
+            match self {
+                PartAttributes::ManualControl => turret.manual_control = text.parse()?,
+                PartAttributes::Elevator => turret.elevator = Some(text.parse()?),
+                _ => {}
+            }
+        };
+
+        return Ok(());
+    }
+
+    pub fn smart_set_field(
+        &self,
+        all_parts: &mut Query<(&mut BasePart, Option<&mut AdjustableHull>, Option<&mut Turret>, Entity)>,
+        selected_parts: &Query<Entity, With<Selected>>,
+        part_registry: &Res<PartRegistry>,
+        value: &str
+    ){
+        let mut all_colliders: Vec<(Transform,AdjustableHull)> = Vec::new();
+        let mut all_colliders_entities: Vec<Entity>= Vec::new();
+
+        let mut all_orig_adjustable_hulls: HashMap<Entity,AdjustableHull> = HashMap::new();
+
+        if self.is_adjustable_hull() && self.is_number() {
+            for part in all_parts.iter() {
+                let Some(adjustable_hull) = part.1.as_deref() else {continue;};
+                all_colliders.push((get_collider(&part.0, Some(adjustable_hull), part_registry.parts.get(&part.0.id).unwrap()),(adjustable_hull.clone())));
+                all_colliders_entities.push(part.3);
+                all_orig_adjustable_hulls.insert(part.3,adjustable_hull.clone());
+            }
+        }
+
+        let selff = *self;
+
+
+        for selected_entity in selected_parts {
+            let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
+            //let original_adjustable_hull = selected_part.1.as_ref().map(|x| x.as_ref().clone());
+
+            selff.set_field(Some(&mut selected_part.0), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), value);
+
+            //println!("is it the thing {:?} and {:?}", editor_data.edit_near, selff.is_adjustable_hull()); 
+
+            if selff.is_number() && selff.is_adjustable_hull() && selected_part.1.is_some() {
+                let Ok(value) = value.parse::<f32>() else {continue;};
+                let value = &value;
+                let Some(origin_hull) = selected_part.1.as_deref() else {return;};
+                let origin_hull = origin_hull.clone();
+
+                let original_adjustable_hull = 
+                    //all_colliders[all_colliders_entities.iter().position(|x| x.clone()==selected_entity).unwrap()].1;
+                    all_orig_adjustable_hulls.get(&selected_entity.clone()).unwrap();
+                let collider = get_collider(selected_part.0.deref(), Some(&original_adjustable_hull), part_registry.parts.get(&selected_part.0.id).unwrap());
+                println!("THE ADJUSTABLE HULL TO CHECK IS {:?}",origin_hull);
+                let adjacents = with_corner_adjacent_adjustable_hulls((&collider,&original_adjustable_hull), &all_colliders/* , &mut gizmos_debug */);
+
+
+
+
+
+                let changed_front = selff != PartAttributes::BackWidth && selff != PartAttributes::BackSpread;
+                let changed_back = selff != PartAttributes::FrontWidth && selff != PartAttributes::FrontSpread;
+                let changed_top = 
+                    selff == PartAttributes::FrontWidth ||
+                    selff == PartAttributes::BackWidth ||
+                    selff == PartAttributes::FrontSpread ||
+                    selff == PartAttributes::BackSpread ||
+
+                    selff == PartAttributes::TopRoundness;
+                let changed_bottom = 
+                    selff == PartAttributes::FrontWidth ||
+                    selff == PartAttributes::BackWidth ||
+                    selff == PartAttributes::BottomRoundness;
+
+
+
+
+                for origin_side in AdjHullSide::VARIANTS{
+                    let Some(adjacent) = adjacents[*origin_side] else {continue;};
+                    // gizmos_debug.to_display.push(GizmoDisplay::Cuboid(all_colliders[adjacent.0].0, Color::srgb_u8(255, 0, 255)));
+                    // gizmos_debug.to_display.push(GizmoDisplay::Arrow(collider.translation,collider.translation+cuboid_face_normal(&collider, &adjacent.0), Color::srgb_u8(255, 0, 255)));
+
+                    let mut adjacent_hull = all_parts.get_mut(all_colliders_entities[adjacent.0]).unwrap().1.unwrap();
+                    let hori_flipped = adjacent.1;
+                    let vert_flipped = adjacent.2;
+
+                    //println!("we are now fixing up {:?} which is {:?} and {:?}",adjacent_hull,hori_flipped,vert_flipped);
+                    
+
+                    match origin_side {
+                        AdjHullSide::Front => {
+                            if !changed_front {continue;}
+
+                            match selff {
+                                PartAttributes::FrontWidth=>{
+                                    set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, value);
+                                    set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, &(value+origin_hull.front_spread));
+                                }
+                                PartAttributes::FrontSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, &(value+origin_hull.front_width));}
+                                PartAttributes::TopRoundness|PartAttributes::BottomRoundness=>{if changed_top^vert_flipped {adjacent_hull.top_roundness=*value;}else{adjacent_hull.bottom_roundness=*value;}}
+                                PartAttributes::Height=>{adjacent_hull.height=*value;}
+                                _ => {}
+                            }
+                        }
+                        AdjHullSide::FrontTop => {
+                            if !(changed_front && changed_top) {continue;}
+
+                            match selff {
+                                PartAttributes::FrontWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, &(value+origin_hull.front_spread));}
+                                PartAttributes::FrontSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, &(value+origin_hull.front_width));}
+                                _ => {}
+                            }
+                        }
+                        AdjHullSide::FrontBottom => {
+                            if !(changed_front && changed_bottom) {continue;}
+
+                            match selff {
+                                PartAttributes::FrontWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, value);}
+                                _ => {}
+                            }
+                        }
+
+
+                        AdjHullSide::Back => {
+                            if !changed_back {continue;}
+
+                            match selff {
+                                PartAttributes::BackWidth=>{
+                                    set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, value);
+                                    set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &vert_flipped, &(value+origin_hull.back_spread));
+                                }
+                                PartAttributes::BackSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &vert_flipped, &(value+origin_hull.back_width));}
+                                PartAttributes::TopRoundness|PartAttributes::BottomRoundness=>{if changed_top^vert_flipped {adjacent_hull.top_roundness=*value;}else{adjacent_hull.bottom_roundness=*value;}}
+                                PartAttributes::Height=>{adjacent_hull.height=*value;}
+                                _ => {}
+                            }
+                        }
+                        AdjHullSide::BackTop => {
+                            if !(changed_back && changed_top) {continue;}
+
+                            match selff {
+                                PartAttributes::BackWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, &(value+origin_hull.back_spread));}
+                                PartAttributes::BackSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, &(value+origin_hull.back_width));}
+                                _ => {}
+                            }
+                        }
+                        AdjHullSide::BackBottom => {
+                            if !(changed_back && changed_bottom) {continue;}
+
+                            match selff {
+                                PartAttributes::BackWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &vert_flipped, value);}
+                                _ => {}
+                            }
+                        }
+
+
+                        AdjHullSide::Top => {
+                            if !changed_top {continue;}
+
+                            match selff {
+                                PartAttributes::FrontSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, &(value+origin_hull.front_width));}
+                                PartAttributes::BackSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, &(value+origin_hull.back_width));}
+                                PartAttributes::FrontWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &!vert_flipped, &(value+origin_hull.front_spread));}
+                                PartAttributes::BackWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, &(value+origin_hull.back_spread));}
+                                _ => {}
+                            }
+                        }
+                        AdjHullSide::Bottom => {
+                            if !changed_bottom {continue;}
+
+                            match selff {
+                                PartAttributes::FrontWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &hori_flipped, &vert_flipped, &value);}
+                                PartAttributes::BackWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, &value);}
+                                _ => {}
+                            }
+                        }
+
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Display for PartAttributes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,"{}",match self {
+            PartAttributes::Id => "Id",
+            PartAttributes::IgnorePhysics => "IgnorePhysics",
+            PartAttributes::PositionX => "Position|位置 X",
+            PartAttributes::PositionY => "Position|位置 Y",
+            PartAttributes::PositionZ => "Position|位置 Z",
+            PartAttributes::RotationX => "Rotation|旋转 X",
+            PartAttributes::RotationY => "Rotation|旋转 Y",
+            PartAttributes::RotationZ => "Rotation|旋转 Z",
+            PartAttributes::ScaleX => "Scale|尺度 X",
+            PartAttributes::ScaleY => "Scale|尺度 Y",
+            PartAttributes::ScaleZ => "Scale|尺度 Z",
+            PartAttributes::Color => "Color|颜色",
+            PartAttributes::Armor => "Armor|装甲",
+            PartAttributes::Length => "Length|长度",
+            PartAttributes::Height => "Height|高度",
+            PartAttributes::FrontWidth => "ForwardWidth|前段宽度",
+            PartAttributes::BackWidth => "BackwardWidth|后段宽度",
+            PartAttributes::FrontSpread => "ForwardSpread|前段扩散",
+            PartAttributes::BackSpread => "BackwardSpread|后段扩散",
+            PartAttributes::TopRoundness => "TopRoundness|上表面弧度",
+            PartAttributes::BottomRoundness => "BottomRoundness|下表面弧度",
+            PartAttributes::HeightScale => "HeightScale|高度缩放",
+            PartAttributes::HeightOffset => "HeightOffset|高度偏移",
+            PartAttributes::ManualControl => "ManualControl",
+            PartAttributes::Elevator => "Elevator",
+        })
+    }
 }

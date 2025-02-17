@@ -1,5 +1,5 @@
 use core::str;
-use std::{borrow::BorrowMut, error::Error, fmt::Display, fs, path::Path};
+use std::{error::Error, fmt::Display, fs, path::Path};
 
 use bevy::{color::Color, math::Vec3, prelude::Component};
 use quick_xml::{events::{BytesStart, Event}, Reader};

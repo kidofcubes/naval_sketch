@@ -1,13 +1,12 @@
 use core::f32;
-use std::{collections::VecDeque, iter::once, ops::{Deref, DerefMut}};
+use std::collections::VecDeque;
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets}, color::{Color, Luminance}, ecs::{event::{Event, EventCursor, EventReader, EventWriter}, query, system::SystemState, world::World}, gizmos::{gizmos, primitives::dim3::Plane3dBuilder}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::{Aabb3d, AabbCast3d, Bounded3d, BoundedExtrusion, BoundingVolume}, Dir3, Direction3d, EulerRot, Isometry3d, Quat, Ray3d, Vec2, Vec3, Vec3A, VectorSpace}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoConfig, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, InfinitePlane3d, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Primitive3d, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::{List, Map}, text::TextFont, ui::{BackgroundColor, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Update}, color::Color, ecs::{event::EventCursor, system::SystemState, world::World}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{Dir3, Vec3}, prelude::{Camera, Component, Entity, Events, Gizmos, GlobalTransform, KeyCode, Local, MeshRayCast, Query, RayCastSettings, Res, ResMut, Resource, Single, Transform, With}, utils::{default, HashMap}, window::Window};
+use bevy_egui::EguiContexts;
 use enum_collections::{EnumMap, Enumerated};
-use rand::seq::IndexedRandom;
 use regex::Regex;
-use smol_str::SmolStr;
 
-use crate::{cam_movement::EditorCamera, editor_actions::EditorActionEvent, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{cam_movement::EditorCamera, editor_actions::EditorActionEvent, editor_ui::{on_part_changed, render_gizmos, update_command_text, update_selected, EditorUiPlugin}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart}, parts::{bevy_to_unity_translation, get_collider, BasePartMesh, PartRegistry}};
 
 #[derive(Resource)]
 pub struct DebugGizmo{
@@ -287,7 +286,7 @@ fn execute_queued_commands(
 }
 
 pub fn translate_floatings(
-    mut editor_data: ResMut<EditorData>,
+    editor_data: ResMut<EditorData>,
     camera_query: Single<(&Camera, &GlobalTransform, &EditorCamera)>,
     windows: Single<&Window>,
     mut ray_cast: MeshRayCast,
@@ -365,7 +364,7 @@ pub fn translate_floatings(
         
 
         //println!("TRANSOFMRMED EVERYTHING BY {:?}",translation);
-        for mut selected in &mut selected_query {
+        for selected in &mut selected_query {
             //transform.0.translation=camera_translation+translation;
             //part_query.get_mut(selected).unwrap().2.translation=((camera_translation+translation));
             part_query.get_mut(selected).unwrap().0.position=bevy_to_unity_translation(&(camera_translation+translation));
@@ -388,7 +387,15 @@ fn command_typing(
     mut editor_data: ResMut<EditorData>,
     input_events: Res<Events<KeyboardInput>>,
     input_reader: Local<EventCursor<KeyboardInput>>,
+    mut contexts: EguiContexts,
 ){
+
+    let mut focused = false;
+    contexts.ctx_mut().memory(|mem|{
+        focused = mem.focused().is_some();
+    });
+    if focused {return;}
+
     for input in input_reader.clone().read(&input_events) {
         if !input.state.is_pressed() {
             continue;

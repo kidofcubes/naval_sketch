@@ -7,12 +7,13 @@ mod asset_extractor;
 mod editor_utils;
 mod editor_actions;
 
-use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{mesh::{Extrudable, Indices}, settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::HashMap, window::CursorGrabMode};
-use cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text, CameraMovementPlugin};
+use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::HashMap};
+use bevy_egui::EguiPlugin;
+use cam_movement::CameraMovementPlugin;
 use editor::{EditorPlugin};
-use parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
+use parsing::{load_save, AdjustableHull, BasePart, Part};
 use parts::{on_part_meshes_init, place_part, register_all_parts, PartRegistry};
-use std::{cmp::{max, min}, env, f32::consts::FRAC_PI_2, path::Path};
+use std::{env, path::Path};
 
 
 
@@ -34,16 +35,16 @@ fn update_material_on<E>(
 
 fn temp_test_update(
     //mut mesh_thing: ResMut<BuildData>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    meshes: ResMut<Assets<Mesh>>,
     key: Res<ButtonInput<KeyCode>>,
     mut query: Query<(Entity, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
-    mut hull_query: Query<(Entity, &BasePart, &mut AdjustableHull)>,
+    hull_query: Query<(Entity, &BasePart, &mut AdjustableHull)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut scenes: ResMut<Assets<Scene>>,
+    scenes: ResMut<Assets<Scene>>,
     parent_query: Query<&Parent>,
-    mut base_part_query: Query<(Entity, &BasePart)>,
-    mut commands: Commands,
-    mut gizmo: Gizmos
+    base_part_query: Query<(Entity, &BasePart)>,
+    commands: Commands,
+    gizmo: Gizmos
 ) {
     if key.just_pressed(KeyCode::KeyH) {
         let hovered_mat = StandardMaterial::from_color(Color::WHITE);
@@ -336,8 +337,9 @@ fn main() {
                 MeshPickingPlugin,
                 EditorPlugin,
                 //OutlinePlugin,
+                EguiPlugin
                 ))
-        .add_systems(Startup, ((register_all_parts,setup).chain()))
+        .add_systems(Startup, (register_all_parts,setup).chain())
         .add_systems(Update, (temp_test_update, on_part_meshes_init))
 
 

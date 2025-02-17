@@ -1,7 +1,7 @@
-use std::{collections::BTreeMap, env, error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, ReadDir}, mem, path::{Path, PathBuf}, time::Duration};
+use std::{error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, ReadDir}, path::{Path, PathBuf}, time::Duration};
 
 use bevy::{math::Vec3, reflect::List, utils::HashMap};
-use quick_xml::{events::{BytesStart}, Reader};
+use quick_xml::Reader;
 
 use regex::Regex;
 use yaml_rust2::Yaml;
@@ -167,7 +167,7 @@ pub fn get_workshop_parts(workshop_folder: &Path, cache_folder: &Path) -> Vec<Pa
     println!("workshop folder is {:?}",workshop_folder);
     let mut parts: Vec<PartData> = Vec::new();
 
-    for workshop_item in read_dir(workshop_folder.clone()).unwrap() {
+    for workshop_item in read_dir(workshop_folder).unwrap() {
         let Ok(path) = workshop_item else {
             continue;
         };
