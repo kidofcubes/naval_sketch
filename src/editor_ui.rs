@@ -1,12 +1,12 @@
 use core::f32;
 use std::{fmt::Display, iter::once, path::Path};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::{Or}, schedule::IntoSystemConfigs, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
-use bevy_egui::{egui::{self, Context, FontData, FontDefinitions, TextEdit, Vec2b}, EguiContexts};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::Or, schedule::IntoSystemConfigs, world::{OnAdd, OnRemove}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
+use bevy_egui::{egui::{self, Color32, Context, FontData, FontDefinitions, RichText, TextEdit, Vec2b}, EguiContexts};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 
-use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMeshes, PartAttributes, PartRegistry}};
+use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMeshes, PartAttributes, PartRegistry}};
 
 pub struct EditorUiPlugin;
 
@@ -14,7 +14,6 @@ impl Plugin for EditorUiPlugin {
     fn build(&self, app: &mut bevy::app::App) {
         app.insert_resource(
             PropertiesDisplayData {
-                displays: EnumMap::new_option(),
                 properties_text_buffers: EnumMap::new(|| {"".to_string()}),
                 selected: PartAttributes::PositionX
             }
@@ -50,7 +49,7 @@ impl Plugin for EditorUiPlugin {
             }
         );
         app.add_systems(Startup, spawn_ui.after(register_all_parts).after(spawn_player));
-        app.add_systems(Update, (on_part_display_changed,update_scroll_position));
+        app.add_systems(Update, (update_scroll_position));
         app.insert_resource(
             CommandDisplayData {
                 mult: -1.0,
@@ -62,7 +61,7 @@ impl Plugin for EditorUiPlugin {
             }
         );
         app.add_systems(Startup, setup_ui);
-        app.add_systems(Update, ui_example_system);
+        app.add_systems(Update, egui_update);
         app.insert_resource(TestData { text: "".to_owned() } );
     }
 }
@@ -93,8 +92,9 @@ fn setup_ui(
 }
 
 
-fn ui_example_system(
+fn egui_update(
     mut contexts: EguiContexts,
+    mut editor_data: ResMut<EditorData>,
     mut test_data: ResMut<TestData>,
     mut all_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>, Option<&mut Turret>, Entity)>,
     selected: Query<Entity, With<Selected>>,
@@ -111,7 +111,7 @@ fn ui_example_system(
 
     
 
-    egui::Window::new("Part Properties")
+    egui::Window::new("Part Properties|设置")
         .resizable(Vec2b::new(false,false))
         // .max_width(f32::MAX)
         // .max_height(f32::MAX)
@@ -121,17 +121,30 @@ fn ui_example_system(
             for attr in PartAttributes::VARIANTS {
                 //properties_display_data.displays[*attr]=Some(attribute_editor(parent, *attr, font.clone()));
                 ui.horizontal(|ui| {
-                    ui.label(attr.to_string());
-                    let text_box = ui.add(TextEdit::singleline(&mut display_properties.properties_text_buffers[*attr]));
-                    if display_properties.is_changed() {
-
+                    let mut label = RichText::new(attr.to_string());
+                    if display_properties.selected == *attr {
+                        label = label
+                            .background_color(Color32::from_rgb(96, 96, 96))
+                            .color(Color32::from_rgb(255, 255, 255));
                     }
+                    ui.label(label);
+                    let text_box = ui.add(TextEdit::singleline(&mut display_properties.properties_text_buffers[*attr]));
                     if(text_box.changed()){
-                        //println!("CHANGED IT TO {}",test_data.text);
-                        if attr.is_number() {
-                            for selected_entity in &selected {
+                        // if editor_data.edit_near {
+                        //     display_properties.selected.smart_set_field(&mut all_parts, &selected_parts, &part_registry, &value.to_string());
+                        // }else{
+                        //     for selected_entity in &selected_parts {
+                        //         let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
+                        //         display_properties.selected.set_field(Some(selected_part.0.as_mut()), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value.to_string());
+                        //     }
+                        // }
 
-                            }
+                        if display_properties.properties_text_buffers[*attr] != "" {
+                            editor_data.queued_actions.push_front(
+                                EditorActionEvent::SetAttribute {
+                                    attribute: Some(*attr), value: display_properties.properties_text_buffers[*attr].clone()
+                                }
+                            );
                         }
                     }
                 });
@@ -155,7 +168,6 @@ pub struct CommandDisplayData {
 
 #[derive(Resource)]
 pub struct PropertiesDisplayData {
-    pub displays: EnumMap<PartAttributes,Option<Entity>,{PartAttributes::SIZE}>, 
     pub properties_text_buffers: EnumMap<PartAttributes,String,{PartAttributes::SIZE}>, 
     pub selected: PartAttributes,
 }
@@ -252,26 +264,6 @@ pub fn spawn_ui(
         ..default()
     };
 
-
-    commands
-        .spawn((Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(12.0),
-                right: Val::Px(12.0),
-                height: Val::Auto,
-                width: Val::Px(40.0*(font_data.font_width*font_data.mult)),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(Color::srgba_u8(64, 64, 64, 128)),
-            TargetCamera(*editor_camera),
-        ))
-        .with_children(|parent| {
-            for attr in PartAttributes::VARIANTS {
-                properties_display_data.displays[*attr]=Some(attribute_editor(parent, *attr, font.clone()));
-            }
-        })
-    ;
 
     commands.spawn((
         RenderLayers::layer(1),
@@ -486,38 +478,6 @@ pub fn update_scroll_position(
     }
 }
 
-
-
-
-
-
-fn on_part_display_changed(
-    mut text_color_query: Query<&mut TextColor>,
-    display_properties: Res<PropertiesDisplayData>
-){
-    if display_properties.is_changed() {
-        for attribute in PartAttributes::VARIANTS {
-            text_color_query.get_mut(display_properties.displays[*attribute].unwrap()).unwrap().0 = Color::srgb_u8(255, 255, 255);
-        }
-        text_color_query.get_mut(display_properties.displays[display_properties.selected].unwrap()).unwrap().0 = Color::srgb_u8(0, 255, 0);
-    }
-}
-
-
-
-fn attribute_editor(parent: &mut ChildBuilder, attribute: PartAttributes, font: TextFont) -> Entity{
-    return parent.spawn((
-            Node {
-                left: Val::Px(12.0),
-                position_type: PositionType::Relative,
-                ..default()
-            },
-            Text::new(format!("{:?}: ???",attribute)),
-            TextColor::WHITE,
-            font,
-    )).id();
-}
-
 // fn random_color() -> Color {
 //     Color::srgb_u8(rand::random(), rand::random(), rand::random())
 // }
@@ -707,14 +667,17 @@ pub fn on_part_changed(
     mut changed_base_part: Query<(&mut Transform, Entity), Or<(Changed<BasePart>,Changed<AdjustableHull>,Changed<Turret>)>>,
     //parts: Query<(Ref<BasePart>, Option<Ref<AdjustableHull>>, Option<Ref<Turret>>)>,
     parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)>,
-    base_part_meshes: Query<&BasePartMeshes>,
+    mut base_part_meshes: Query<&mut BasePartMeshes>,
     selected: Query<Entity, With<Selected>>,
-    mut text_query: Query<&mut Text>,
     mut display_properties: ResMut<PropertiesDisplayData>,
 
     mut meshes_query: Query<(&mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    children_query: Query<&Children>,
+    part_registry: Res<PartRegistry>,
+    mut commands: Commands,
 ){
     let mut has_changed = false;
     for mut pair in &mut changed_base_part {
@@ -735,13 +698,44 @@ pub fn on_part_changed(
             );
 
             meshes_query.get_mut(pair.1).unwrap().0.0 = meshes.add(mesh);
+        } else {
+            // TODO THIS IS STUPID
+            for child in children_query.iter_descendants(pair.1) {
+                commands.entity(child).despawn();
+            }
+            //commands.entity(pair.1).clear_children();
+
+
+            if let Some(new_part_data) = part_registry.parts.get(&parts.get(pair.1).unwrap().0.id) {
+                let asset_path = AssetPath::from(new_part_data.model.clone());
+                let mut handle = asset_server.get_handle(&asset_path);
+                if handle.is_none() {
+                    handle = Some(asset_server.load(
+                         GltfAssetLabel::Scene(0).from_asset(
+                             asset_path
+                         )
+                     ));
+                }
+
+                if let Ok(mut part_meshes) = base_part_meshes.get_mut(pair.1) {
+                    part_meshes.meshes.clear();
+                }
+                commands.entity(pair.1)
+                    .remove::<(SceneInstance,Children)>()
+                    .insert(SceneRoot(handle.unwrap()))
+                ;
+            }
+            
         }
 
         if let Ok(part_meshes) = base_part_meshes.get(pair.1) {
             for mesh_entity in &part_meshes.meshes {
-                meshes_query.get_mut(*mesh_entity).unwrap().1.0 = materials.add(parts.get(pair.1).unwrap().0.color);
+                meshes_query.get_mut(*mesh_entity).unwrap().1.0 = materials.add(colored_part_material(parts.get(pair.1).unwrap().0.color));
             }
         }
+
+
+
     }
     if !has_changed {return;}
 
@@ -750,7 +744,6 @@ pub fn on_part_changed(
         selected_parts.push(parts.get(selected_part).unwrap());
     }
 
-    //update_display_text(&selected_parts, &mut text_query, &display_properties);
     update_display_text(&selected_parts, &mut display_properties);
 }
 
@@ -760,53 +753,23 @@ pub fn update_display_text(
     //text_query: &mut Query<&mut Text>,
     display_properties: &mut ResMut<PropertiesDisplayData>
 ){
-    // let mut update_properties_text = false;
-    // for selected in &selected {
-    //     if changed_base_part.contains(selected) {
-    //         update_properties_text = true;
-    //         break;
-    //     }
-    // }
-    // if update_properties_text {
-        let mut selected_properties: EnumMap<PartAttributes,Vec<String>,{PartAttributes::SIZE}> = EnumMap::new_default();
-        for attr in PartAttributes::VARIANTS {
-            selected_properties[*attr] = Vec::new();
-        }
 
-        for part in parts {
-            for attr in PartAttributes::VARIANTS {
-                if let Some(string) = attr.get_field(part.0, part.1, part.2) {
-                    selected_properties[*attr].push(string);
-                }
+    let mut selected_properties: EnumMap<PartAttributes,Vec<String>,{PartAttributes::SIZE}> = EnumMap::new_default();
+    for attr in PartAttributes::VARIANTS {
+        selected_properties[*attr] = Vec::new();
+    }
+
+    for part in parts {
+        for attr in PartAttributes::VARIANTS {
+            if let Some(string) = attr.get_field(part.0, part.1, part.2) {
+                selected_properties[*attr].push(string);
             }
         }
+    }
 
-        for attr in PartAttributes::VARIANTS {
-            display_properties.properties_text_buffers[*attr] = recompute_display_text(&selected_properties[*attr]);
-        }
-
-    //}
-
-    // let mut selected_properties: EnumMap<PartAttributes,Vec<String>,{PartAttributes::SIZE}> = EnumMap::new_default();
-    // for attr in PartAttributes::VARIANTS {
-    //     selected_properties[*attr] = Vec::new();
-    // }
-    //
-    // for part in parts {
-    //     for attr in PartAttributes::VARIANTS {
-    //         if let Some(string) = attr.get_field(part.0, part.1, part.2) {
-    //             selected_properties[*attr].push(string);
-    //         }
-    //     }
-    // }
-    //
-    // for attr in PartAttributes::VARIANTS {
-    //     //if !selected_properties[*attr].is_empty() {
-    //     text_query.get_mut(display_properties.displays[*attr].unwrap()).unwrap().0 = format!("{:?}: {}",attr,recompute_display_text(&selected_properties[*attr]));
-    //     //}
-    // }
-
-
+    for attr in PartAttributes::VARIANTS {
+        display_properties.properties_text_buffers[*attr] = recompute_display_text(&selected_properties[*attr]);
+    }
 }
 
 
@@ -909,7 +872,7 @@ pub fn on_hover(
             commands.entity(base_entity).insert(Hovered{});
             for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
                 if let Ok(mut material) = material_query.get_mut(entity) {
-                    material.0 = materials.add(StandardMaterial::from_color(base_part.color.with_luminance(base_part.color.luminance()*2.0)));
+                    material.0 = materials.add(colored_part_material(base_part.color.with_luminance(base_part.color.luminance()*2.0)));
                 }
             }
             break;
@@ -932,7 +895,7 @@ pub fn on_unhover(
             commands.entity(base_entity).remove::<Hovered>();
             for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
                 if let Ok(mut material) = material_query.get_mut(entity) {
-                    material.0 = materials.add(StandardMaterial::from_color(base_part.color));
+                    material.0 = materials.add(colored_part_material(base_part.color));
                 }
             }
             break;

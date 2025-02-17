@@ -1,5 +1,5 @@
 use std::{fmt::Display, iter::once, ops::Deref, path::Path};
-use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, prelude::*, reflect::List, render::{mesh::Indices, view::RenderLayers}, utils::HashMap};
+use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, log::tracing_subscriber::filter::combinator::And, prelude::*, reflect::List, render::{mesh::Indices, view::RenderLayers}, utils::HashMap};
 use dirs::cache_dir;
 use enum_collections::Enumerated;
 use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, editor::Selected, editor_ui::get_base_part_entity, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret};
@@ -192,6 +192,16 @@ pub fn adjustable_hull_side(adjustable_hull: &AdjustableHull, resolution: usize,
     return (vertices,indices);
 
 }
+
+pub fn colored_part_material(color: Color) -> StandardMaterial {
+    let mut material = StandardMaterial::from_color(color);
+    material.reflectance=0.1;
+    material.double_sided=true;
+    return material;
+}
+
+
+
 #[derive(Component, Debug, Clone)]
 pub struct BasePartMeshes {
     pub meshes: Vec<Entity>,
@@ -203,27 +213,29 @@ pub struct BasePartMesh{
 }
 
 pub fn on_part_meshes_init(
-    mesh_query: Query<Entity, Added<Mesh3d>>,
+    mut mesh_query: Query<(Entity, &mut MeshMaterial3d<StandardMaterial>), Added<Mesh3d>>,
     base_part_query: Query<&BasePart>,
     parent_query: Query<&Parent>,
     mut base_part_meshes_query: Query<&mut BasePartMeshes>,
     layer_query: Query<&RenderLayers>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
 ){
     let mut temp = bevy::utils::HashMap::new();
-    for entity in &mesh_query {
-        if let Some(base_part_entity) = get_base_part_entity(&parent_query, &base_part_query, entity) {
+    for mut entity in &mut mesh_query {
+        if let Some(base_part_entity) = get_base_part_entity(&parent_query, &base_part_query, entity.0) {
             if let Ok(base_part_meshes) = &mut base_part_meshes_query.get_mut(base_part_entity) {
-                base_part_meshes.meshes.push(entity);
+                base_part_meshes.meshes.push(entity.0);
             }else{
                 temp.try_insert(base_part_entity, BasePartMeshes {meshes:Vec::new()});
-                temp.get_mut(&base_part_entity).unwrap().meshes.push(entity);
+                temp.get_mut(&base_part_entity).unwrap().meshes.push(entity.0);
             }
-            commands.get_entity(entity).unwrap().insert(BasePartMesh{base_part:base_part_entity});
+            commands.get_entity(entity.0).unwrap().insert(BasePartMesh{base_part:base_part_entity});
             if let Ok(layer) = layer_query.get(base_part_entity) {
-                commands.get_entity(entity).unwrap().insert(layer.clone());
+                commands.get_entity(entity.0).unwrap().insert(layer.clone());
             }
-            commands.get_entity(entity).unwrap().insert(BasePartMesh{base_part:base_part_entity});
+            commands.get_entity(entity.0).unwrap().insert(BasePartMesh{base_part:base_part_entity});
+            entity.1.0 = materials.add(colored_part_material(base_part_query.get(base_part_entity).unwrap().color));
         }
     }
     for pair in temp {
@@ -598,7 +610,7 @@ impl PartAttributes {
 
                             match selff {
                                 PartAttributes::FrontWidth=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, &(value+origin_hull.front_spread));}
-                                PartAttributes::FrontSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &vert_flipped, &(value+origin_hull.front_width));}
+                                PartAttributes::FrontSpread=>{set_adjustable_hull_width(&mut adjacent_hull, &!hori_flipped, &!vert_flipped, &(value+origin_hull.front_width));}
                                 _ => {}
                             }
                         }

@@ -49,7 +49,7 @@ impl Plugin for EditorPlugin {
         app.insert_resource(
             EditorData {
                 action_history: Vec::new(),
-                queued_commands: Vec::new(),
+                queued_actions: VecDeque::new(),
                 floating: false,
                 edit_near: true,
             }
@@ -134,7 +134,7 @@ pub enum CommandMode {
 #[derive(Resource)]
 pub struct EditorData {
     pub action_history: Vec<Action>,
-    pub queued_commands: Vec<QueuedCommand>, //use deque?
+    pub queued_actions: VecDeque<EditorActionEvent>, //use deque?
     pub floating: bool,
     pub edit_near: bool,
 }
@@ -225,63 +225,19 @@ fn execute_queued_commands(
     let (mut editor_data,mut command_data) = system_state.get_mut(world);
 
 
-    let mut flip_floating = false;
-    let mut editor_commands: Vec<EditorActionEvent> = Vec::new();
-    for queued_command in &editor_data.queued_commands {
-        match command_data.mode {
-            CommandMode::Translation => match queued_command.command.as_str() {
-                "W" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::NEG_Z, mult: queued_command.multiplier });},
-                "A" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::NEG_X, mult: queued_command.multiplier });},
-                "S" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::Z, mult: queued_command.multiplier });},
-                "D" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::X, mult: queued_command.multiplier });},
-                "Q" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::NEG_Y, mult: queued_command.multiplier });},
-                "E" => {editor_commands.push(EditorActionEvent::MoveRelativeDir { vector: Vec3::Y, mult: queued_command.multiplier });},
-                //"W" => {editor_command_writer.send(EditorCommandEvent::MoveRelativeDir { vector: *Dir3::NEG_Z, mult: queued_command.multiplier });},
+    // let mut flip_floating = false;
+    //
+    // if flip_floating {
+    //     editor_data.floating=!editor_data.floating;
+    // }
 
 
+    //for command in editor_data.queued_actions.into_iter() {
 
-                "w" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_Z, mult: queued_command.multiplier });},
-                "a" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_X, mult: queued_command.multiplier });},
-                "s" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::Z, mult: queued_command.multiplier });},
-                "d" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::X, mult: queued_command.multiplier });},
-                "q" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_Y, mult: queued_command.multiplier });},
-                "e" => {editor_commands.push(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::Y, mult: queued_command.multiplier });},
+    let mut queued_actions = std::mem::take(&mut editor_data.queued_actions);
 
-                "f" => {command_data.mode = CommandMode::Attributes}
-                "F" => {flip_floating=true;}
-                _ => {}
-            },
-            CommandMode::Attributes => match queued_command.command.as_str() {
-                "w" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:-1,do_loop:false});},
-                "s" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:1 ,do_loop:false});},
-                "a" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:-5,do_loop:false});},
-                "d" => {editor_commands.push(EditorActionEvent::SwitchSelectedAttribute{offset:5 ,do_loop:false});},
-
-                " " => {editor_commands.push(EditorActionEvent::SetSelectedAttribute {value: queued_command.multiplier});},
-                _ => {}
-            },
-            CommandMode::Rotation => todo!(),
-            CommandMode::Disabled => todo!(),
-        }
-
-        
-
-        let mut history: String= String::new();
-        if queued_command.multiplier!=1.0 {
-            history.push_str(&queued_command.multiplier.to_string());
-        }
-        history.push_str(&queued_command.command);
-        command_data.command_history.push_front(history);
-    }
-    command_data.command_history.truncate(100);
-    editor_data.queued_commands.clear();
-
-    if flip_floating {
-        editor_data.floating=!editor_data.floating;
-    }
-
-    for command in editor_commands {
-        world.trigger(command);
+    while(queued_actions.len()>0){
+        world.trigger(queued_actions.pop_front().unwrap());
     }
 }
 
@@ -479,12 +435,52 @@ fn command_typing(
                 
                 if is_command.0 {
                     if is_command.1 {
-                        editor_data.queued_commands.push(
-                            QueuedCommand {
-                                multiplier: mult,
-                                command: command_match.as_str().to_string(),
-                            }
-                        );
+                        match command_data.mode {
+                            CommandMode::Translation => match command_match.as_str() {
+                                "W" => {editor_data.queued_actions.push_front(EditorActionEvent::MoveRelativeDir { vector: Vec3::NEG_Z, mult: mult });},
+                                "A" => {editor_data.queued_actions.push_front(EditorActionEvent::MoveRelativeDir { vector: Vec3::NEG_X, mult: mult });},
+                                "S" => {editor_data.queued_actions.push_front(EditorActionEvent::MoveRelativeDir { vector: Vec3::Z, mult: mult });},
+                                "D" => {editor_data.queued_actions.push_front(EditorActionEvent::MoveRelativeDir { vector: Vec3::X, mult: mult });},
+                                "Q" => {editor_data.queued_actions.push_front(EditorActionEvent::MoveRelativeDir { vector: Vec3::NEG_Y, mult: mult });},
+                                "E" => {editor_data.queued_actions.push_front(EditorActionEvent::MoveRelativeDir { vector: Vec3::Y, mult: mult });},
+                                //"W" => {editor_command_writer.send(EditorCommandEvent::MoveRelativeDir { vector: *Dir3::NEG_Z, mult: mult });},
+
+
+
+                                "w" => {editor_data.queued_actions.push_front(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_Z, mult: mult });},
+                                "a" => {editor_data.queued_actions.push_front(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_X, mult: mult });},
+                                "s" => {editor_data.queued_actions.push_front(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::Z, mult: mult });},
+                                "d" => {editor_data.queued_actions.push_front(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::X, mult: mult });},
+                                "q" => {editor_data.queued_actions.push_front(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_Y, mult: mult });},
+                                "e" => {editor_data.queued_actions.push_front(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::Y, mult: mult });},
+
+                                "f" => {command_data.mode = CommandMode::Attributes}
+                                //"F" => {flip_floating=true;}
+                                _ => {}
+                            },
+                            CommandMode::Attributes => match command_match.as_str() {
+                                "w" => {editor_data.queued_actions.push_front(EditorActionEvent::SwitchSelectedAttribute{offset:-1,do_loop:false});},
+                                "s" => {editor_data.queued_actions.push_front(EditorActionEvent::SwitchSelectedAttribute{offset:1 ,do_loop:false});},
+                                "a" => {editor_data.queued_actions.push_front(EditorActionEvent::SwitchSelectedAttribute{offset:-5,do_loop:false});},
+                                "d" => {editor_data.queued_actions.push_front(EditorActionEvent::SwitchSelectedAttribute{offset:5 ,do_loop:false});},
+
+                                " " => {editor_data.queued_actions.push_front(EditorActionEvent::SetAttribute {attribute: None, value: mult.to_string()});},
+                                _ => {}
+                            },
+                            CommandMode::Rotation => todo!(),
+                            CommandMode::Disabled => todo!(),
+                        }
+
+        
+
+                        let mut history: String= String::new();
+                        if mult!=1.0 {
+                            history.push_str(&mult.to_string());
+                        }
+                        history.push_str(&command_match.as_str());
+                        command_data.command_history.push_front(history);
+                        command_data.command_history.truncate(100);
+                        
                         command_data.current_byte_index=0;
                         command_data.current_command.clear();
                     }

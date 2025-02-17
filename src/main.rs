@@ -12,7 +12,7 @@ use bevy_egui::EguiPlugin;
 use cam_movement::CameraMovementPlugin;
 use editor::{EditorPlugin};
 use parsing::{load_save, AdjustableHull, BasePart, Part};
-use parts::{on_part_meshes_init, place_part, register_all_parts, PartRegistry};
+use parts::{on_part_meshes_init, place_part, register_all_parts, BasePartMesh, BasePartMeshes, PartRegistry};
 use std::{env, path::Path};
 
 
@@ -37,7 +37,7 @@ fn temp_test_update(
     //mut mesh_thing: ResMut<BuildData>,
     meshes: ResMut<Assets<Mesh>>,
     key: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(Entity, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut query: Query<(Entity, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>, &BasePartMesh)>,
     hull_query: Query<(Entity, &BasePart, &mut AdjustableHull)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     scenes: ResMut<Assets<Scene>>,
@@ -52,7 +52,9 @@ fn temp_test_update(
         
 
         for mut pair in &mut query {
-            let colored_mat = StandardMaterial::from_color(base_part_query.get(parent_query.root_ancestor(pair.0)).unwrap().1.color);
+            //let colored_mat = StandardMaterial::from_color(base_part_query.get(parent_query.root_ancestor(pair.0)).unwrap().1.color);
+
+            let colored_mat = StandardMaterial::from_color(base_part_query.get(pair.3.base_part).unwrap().1.color);
             let colored_mat_handle = materials.add(colored_mat);
             // materials.insert(pair.2.id(),
             //     colored_mat.clone()

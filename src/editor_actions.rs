@@ -12,7 +12,7 @@ pub enum EditorActionEvent {
     MoveRelativeDir {vector: Vec3, mult: f32},
     SmartMoveRelativeDir {dir: Dir3, mult: f32},
     SwitchSelectedAttribute {offset: i32, do_loop: bool},
-    SetSelectedAttribute {value: f32},
+    SetAttribute {attribute: Option<PartAttributes>, value: String},
 }
 
 pub fn add_actions(app: &mut App) {
@@ -32,14 +32,16 @@ pub fn modify_selected_attribute(
     selected_parts: Query<Entity, With<Selected>>,
     gizmo: Gizmos,
 ){
-    let EditorActionEvent::SetSelectedAttribute{value} = trigger.event() else {return;};
+    let EditorActionEvent::SetAttribute{attribute, value} = trigger.event() else {return;};
+    let attribute = if attribute.is_some() {attribute.unwrap()}else{display_properties.selected};
+
     gizmos_debug.to_display.clear();
     if editor_data.edit_near {
-        display_properties.selected.smart_set_field(&mut all_parts, &selected_parts, &part_registry, &value.to_string());
+        attribute.smart_set_field(&mut all_parts, &selected_parts, &part_registry, &value);
     }else{
         for selected_entity in &selected_parts {
             let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
-            display_properties.selected.set_field(Some(selected_part.0.as_mut()), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value.to_string());
+            attribute.set_field(Some(selected_part.0.as_mut()), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value);
         }
     }
 
