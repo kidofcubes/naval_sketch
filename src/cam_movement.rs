@@ -1,4 +1,4 @@
-use bevy::{asset::RenderAssetUsages, color::Color, input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, math::DVec2, pbr::ScreenSpaceAmbientOcclusion, prelude::*, render::mesh::Indices, window::CursorGrabMode};
+use bevy::{asset::RenderAssetUsages, color::Color, input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, math::DVec2, pbr::ScreenSpaceAmbientOcclusion, picking::focus::HoverMap, prelude::*, render::mesh::Indices, window::CursorGrabMode};
 use std::{env, f32::consts::FRAC_PI_2};
 
 /// A vector representing the player's input, accumulated over all frames that ran
@@ -23,6 +23,9 @@ pub struct PhysicalTranslation(Vec3);
 /// Used for interpolation in the `interpolate_rendered_transform` system.
 #[derive(Debug, Component, Clone, Copy, PartialEq, Default, Deref, DerefMut)]
 pub struct PreviousPhysicalTranslation(Vec3);
+
+#[derive(Debug, Component, Clone, Copy, PartialEq, Default)]
+pub struct EditorCamera;
 
 pub struct CameraMovementPlugin;
 
@@ -66,6 +69,7 @@ pub fn spawn_player(mut commands: Commands) {
         PhysicalTranslation::default(),
         PreviousPhysicalTranslation::default(),
         ScreenSpaceAmbientOcclusion::default(),
+        EditorCamera,
     ));
 }
 
@@ -178,9 +182,11 @@ pub fn interpolate_rendered_transform(
 pub fn move_player(
     accumulated_mouse_motion: Res<AccumulatedMouseMotion>,
     accumulated_mouse_scroll: Res<AccumulatedMouseScroll>,
+    hover_map: Res<HoverMap>,
+    ui_nodes: Query<&Node>,
     windows: Query<&mut Window>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut player: Query<(&mut Transform), With<Camera3d>>,
+    mut player: Query<(&mut Transform), With<EditorCamera>>,
 ) {
     let mut window = windows.single();
     // if window.cursor_options.grab_mode != CursorGrabMode::Locked {
@@ -217,7 +223,18 @@ pub fn move_player(
 
         transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
     }
+    
+
+    for (_pointer, pointer_map) in hover_map.iter() {
+        for (entity, _hit) in pointer_map.iter() {
+            if ui_nodes.contains(*entity) {
+                return; //skip scroll movement when in ui
+            }
+        }
+    }
+
     let mut translation = Vec3::ZERO;
+
     if mouse.pressed(MouseButton::Middle) {
         translation += ((transform.left()*delta.x)+(transform.up()*delta.y))*0.01;
     }

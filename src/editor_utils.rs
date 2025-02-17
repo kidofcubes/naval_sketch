@@ -564,7 +564,7 @@ pub fn with_corner_adjacent_adjustable_hulls(
     if let Some(x) = orig_adjacents.get(&5) {
         adjacents[AdjHullSide::Front]=Some(*x);
         let front_adjacents = adjacent_adjustable_hulls((&to_check[x.0].0,&to_check[x.0].1), to_check/* , gizmos_debug */);
-        println!("the keys of the front are {:?}",front_adjacents.keys());
+        // println!("the keys of the front are {:?}",front_adjacents.keys());
         if let Some(y) = front_adjacents.get(&1){
             adjacents[AdjHullSide::FrontTop]=Some((y.0,y.1 ^ x.1, y.2 ^ x.2));
         }
@@ -598,7 +598,7 @@ pub fn with_corner_adjacent_adjustable_hulls(
     return adjacents;
 }
 
-
+static TOLERANCE: f32 = 0.002;
 
 pub fn adjacent_adjustable_hulls(
     origin_pair: (&Transform, &AdjustableHull),
@@ -679,7 +679,7 @@ pub fn adjacent_adjustable_hulls(
             // println!("the origin top {:?} bottom {:?}",origin_top_total_width,origin_bottom_total_width);
             // println!("the check top {:?} bottom {:?}",check_top_total_width,check_bottom_total_width);
 
-            if origin_top_total_width != check_top_total_width || origin_bottom_total_width != check_bottom_total_width {continue;}
+            if (origin_top_total_width-check_top_total_width).abs()>TOLERANCE || (origin_bottom_total_width-check_bottom_total_width).abs()>TOLERANCE {continue;}
 
 
 
@@ -696,23 +696,23 @@ pub fn adjacent_adjustable_hulls(
 
             //touching check
             if (dist.dot(*origin.up()).abs() - ((origin.scale.y+check.scale.y)/2.0)).abs() > f32::EPSILON {
-                println!("up down too far away it was {:?}",(dist.dot(*origin.up()).abs() - ((origin.scale.y+check.scale.y)/2.0).abs()).abs());
+                // println!("up down too far away it was {:?}",(dist.dot(*origin.up()).abs() - ((origin.scale.y+check.scale.y)/2.0).abs()).abs());
                 continue;
             }
 
-            println!("its right position is it good though");
+            // println!("its right position is it good though");
 
 
             let origin_is_top: bool = dist.dot(*origin.down()) < 0.0;
             let check_is_top: bool =  dist.dot(*check.down()) > 0.0;
-            println!("hori_flipped {:?} vert_flipped {:?}",hori_flipped,vert_flipped);
-            println!("origin_is_top {:?} check_is_top {:?}",origin_is_top,check_is_top);
+            // println!("hori_flipped {:?} vert_flipped {:?}",hori_flipped,vert_flipped);
+            // println!("origin_is_top {:?} check_is_top {:?}",origin_is_top,check_is_top);
 
             let origin_roundness = if origin_is_top {origin_hull.top_roundness}else{origin_hull.bottom_roundness};
             let check_roundness = if check_is_top {check_hull.top_roundness}else{check_hull.bottom_roundness};
             
             if origin_roundness!=0.0 || check_roundness!=0.0 {
-                println!("failed roundness test origin_roundness {:?} check_roundness {:?}",origin_roundness,check_roundness);
+                // println!("failed roundness test origin_roundness {:?} check_roundness {:?}",origin_roundness,check_roundness);
                 continue;
             }
 
@@ -728,14 +728,14 @@ pub fn adjacent_adjustable_hulls(
             }
 
 
-            if origin_front_width != check_front_width || origin_back_width != check_back_width {
-                println!("width is wrong");
-                println!("trying to add the numbers {:?}",34.87+0.085);
-                println!("trying to add the numbers {:?}",33.65+0.345);
-                println!("origin_front_width {:?} check_front_width {:?}",origin_front_width,check_front_width);
-                println!("origin_back_width {:?} check_back_width {:?}",origin_back_width,check_back_width);
-                println!("the me was {:?}",origin_hull);
-                println!("the other was {:?}",check_hull);
+            if (origin_front_width-check_front_width).abs() > TOLERANCE || (origin_back_width-check_back_width).abs() > TOLERANCE {
+                // println!("width is wrong");
+                // println!("trying to add the numbers {:?}",34.87+0.085);
+                // println!("trying to add the numbers {:?}",33.65+0.345);
+                // println!("origin_front_width {:?} check_front_width {:?}",origin_front_width,check_front_width);
+                // println!("origin_back_width {:?} check_back_width {:?}",origin_back_width,check_back_width);
+                // println!("the me was {:?}",origin_hull);
+                // println!("the other was {:?}",check_hull);
 
                 continue;
             }

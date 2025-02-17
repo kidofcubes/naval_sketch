@@ -7,7 +7,7 @@ use rand::seq::IndexedRandom;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor::{DebugGizmo, EditorData, GizmoDisplay, Selected}, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{adjacent_adjustable_hulls, arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, GizmoDisplay, Selected}, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{adjacent_adjustable_hulls, arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
 
 
 #[derive(Event)]
@@ -395,7 +395,7 @@ pub fn move_selected_relative_dir(
     trigger: Trigger<EditorActionEvent>,
     selected: Query<Entity, With<Selected>>,
     mut all_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>)>,
-    camera_transform: Single<(&Camera, &GlobalTransform)>,
+    camera_transform: Single<(&Camera, &GlobalTransform, &EditorCamera)>,
 ){
     let EditorActionEvent::MoveRelativeDir{vector, mult} = trigger.event() else {return;};
     let mut rot = camera_transform.1.rotation().to_euler(EulerRot::XYZ);
@@ -420,7 +420,7 @@ pub fn smart_move_selected_relative_dir(
     trigger: Trigger<EditorActionEvent>,
     selected: Query<Entity, With<Selected>>,
     //camera_transform: &Query<&Transform, With<Camera3d>>,
-    camera_query: Single<(&Camera, &GlobalTransform)>,
+    camera_query: Single<(&Camera, &GlobalTransform, &EditorCamera)>,
     mut all_parts: Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
     part_registry: Res<PartRegistry>,
     mut gizmo: Gizmos,

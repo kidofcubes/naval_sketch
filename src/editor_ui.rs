@@ -1,12 +1,12 @@
 use core::f32;
-use std::{fmt::Display, iter::once, ops::{Deref, DerefMut}};
+use std::{fmt::Display, iter::once, ops::{Deref, DerefMut}, path::Path};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetServer, Assets, RenderAssetUsages}, color::{Color, ColorToComponents, Luminance, Srgba}, ecs::{event::EventCursor, query::{self, Or}, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{bounding::BoundingVolume, Dir3, EulerRot, FromRng, Isometry3d, Quat, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::mesh::Mesh, text::{TextColor, TextFont, TextLayout}, ui::{BackgroundColor, FlexDirection, Node, PositionType, Val}, utils::{default, HashMap}, window::Window};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, RenderAssetUsages}, color::{palettes::css::RED, Color, ColorToComponents, Luminance, Srgba}, core::Name, ecs::{event::{EventCursor, EventReader}, query::{self, Or}, schedule::IntoSystemConfigs, world::{OnAdd, OnRemove}}, hierarchy::ChildBuilder, input::{keyboard::{Key, KeyboardInput}, mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Dir3, EulerRot, FromRng, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Events, GizmoPrimitive3d, Gizmos, GlobalTransform, HierarchyQueryExt, KeyCode, Local, Mesh3d, MeshRayCast, Out, Over, Parent, Plane3d, Pointer, PointerButton, Query, RayCastSettings, Ref, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, ComputedCameraValues, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::{Msaa, RenderLayers}}, scene::ron::de, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, BorderColor, BorderRadius, FlexDirection, FlexWrap, GridPlacement, Node, Outline, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}, window::Window};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::{mock::StepRng, SmallRng, StdRng}, Rng, SeedableRng};
 use regex::Regex;
 
-use crate::{editor::{CommandData, CommandMode, EditorData, Selected}, editor_utils::{aabb_from_transform, adjacent_adjustable_hulls, cuboid_face, cuboid_face_normal, get_nearby, simple_closest_dist, transform_from_aabb, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, unity_to_bevy_translation, BasePartMeshes, PartRegistry}};
+use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_utils::{aabb_from_transform, adjacent_adjustable_hulls, cuboid_face, cuboid_face_normal, get_nearby, simple_closest_dist, transform_from_aabb, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, HasBasePart, Part, Turret}, parts::{base_part_to_bevy_transform, generate_adjustable_hull_mesh, get_collider, place_part, register_all_parts, unity_to_bevy_translation, BasePartMeshes, PartRegistry}};
 
 pub struct EditorUiPlugin;
 
@@ -46,8 +46,8 @@ impl Plugin for EditorUiPlugin {
                 update_display_text(&selected_parts, &mut text_query, &display_properties);
             }
         );
-        app.add_systems(Startup, (spawn_ui));
-        app.add_systems(Update, (on_part_display_changed));
+        app.add_systems(Startup, (spawn_ui.after(register_all_parts).after(spawn_player)));
+        app.add_systems(Update, (on_part_display_changed,update_scroll_position));
         app.insert_resource(
             CommandDisplayData {
                 mult: -1.0,
@@ -83,6 +83,13 @@ pub fn spawn_ui(
     asset_server: Res<AssetServer>,
     mut font_data: ResMut<CommandDisplayData>,
     mut properties_display_data: ResMut<PropertiesDisplayData>,
+
+    editor_camera: Single<Entity, With<EditorCamera>>,
+
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    part_registry: Res<PartRegistry>,
+
     mut commands: Commands
 ) {
     font_data.mult = 2.0;
@@ -91,12 +98,15 @@ pub fn spawn_ui(
 
     //bottom command bar
     commands
-        .spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        })
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(12.0),
+                left: Val::Px(12.0),
+                ..default()
+            },
+            TargetCamera(*editor_camera),
+        ))
         .with_children(|parent| {
             font_data.input_text_display = Some(
                 parent.spawn_empty().insert((
@@ -153,8 +163,10 @@ pub fn spawn_ui(
 
     //right properties panel
     let font = TextFont {
-        font: asset_server.load("/usr/share/fonts/TTF/CozetteVector.ttf"),
-        font_size: font_data.font_size*font_data.mult, 
+        //font: asset_server.load("/usr/share/fonts/TTF/CozetteVector.ttf"),
+        //font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
+        font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc"),
+        font_size: 20.0, 
         ..default()
     };
 
@@ -169,7 +181,8 @@ pub fn spawn_ui(
                 flex_direction: FlexDirection::Column,
                 ..default()
             },
-            BackgroundColor(Color::srgba_u8(64, 64, 64, 128))
+            BackgroundColor(Color::srgba_u8(64, 64, 64, 128)),
+            TargetCamera(*editor_camera),
         ))
         .with_children(|parent| {
             for attr in PartAttributes::VARIANTS {
@@ -177,7 +190,224 @@ pub fn spawn_ui(
             }
         })
     ;
+
+    commands.spawn((
+        RenderLayers::layer(1),
+        Mesh3d(meshes.add(Cuboid::new(10.0, 10.0, 10.0))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
+        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.0,0.0,0.0)),
+    )); //???
+    
+    let mut part_offset = Vec3::new(0.0,0.0,0.0);
+    // for part in &part_registry.parts {
+    //     //println!("PARTS ARE {:?}",part_registry.parts.len());
+    //     let mut display_part = commands.spawn((
+    //         RenderLayers::layer(1),
+    //     ));
+    //     let base_part = BasePart {
+    //         id: *part.0,
+    //         ignore_physics: false,
+    //         position: part_offset.clone(),
+    //         rotation: Vec3::ZERO,
+    //         scale: Vec3 {x:1.0,y:1.0,z:1.0},
+    //         color: Color::WHITE,
+    //         armor: 0,
+    //     };
+    //
+    //     let part: Part = 
+    //         if let Some(weapon) = &part.1.weapon {
+    //             Part::Turret(base_part, 
+    //                 Turret {
+    //                     manual_control: false,
+    //                     elevator: None,
+    //                 }
+    //             )
+    //
+    //         }else{
+    //             Part::Normal(base_part)
+    //         };
+    //     
+    //     place_part(
+    //         &mut meshes,
+    //         &mut materials,
+    //         &asset_server,
+    //         &part_registry,
+    //         &mut display_part,
+    //         &part
+    //     );
+    //     part_offset+=Vec3::new(0.0,0.0,10.0);
+    // }
+    
+
+
+
+    let ui_camera = commands.spawn((
+        Camera3d {
+            ..default()
+        },
+        Projection::from(OrthographicProjection {
+            scaling_mode: bevy::render::camera::ScalingMode::Fixed { width: 512.0, height: 512.0 },
+            scale: 0.1,
+            ..OrthographicProjection::default_3d()
+        }),
+        Camera {
+            // renders after / on top of the main camera
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            viewport: Some(Viewport {
+                physical_position: UVec2::new(0, 0),
+                physical_size: UVec2::new(512, 512),
+                ..default()
+            }),
+            
+
+            
+            ..default()
+        },
+        RenderLayers::layer(1),
+        Transform::from_xyz(0.0,100.0,100.0).looking_at(Vec3::ZERO, Vec3::Y),
+    )).id();
+
+    let mut light_transform = Transform::from_xyz(500.0, 500.0, 500.0);
+    light_transform = light_transform.looking_at(Vec3 {x:0.0, y:0.0, z:0.0 }, Vec3::Y);
+    // light
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10000.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        light_transform,
+        RenderLayers::layer(1),
+    ));
+
+
+
+
+    println!("the mode is {:?}",asset_server.mode());
+
+    // parts browser
+    commands
+        .spawn((Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(12.0),
+                left: Val::Px(12.0),
+                height: Val::Px(512.0),
+                width: Val::Px(512.0),
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                flex_basis: Val::Px(512.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba_u8(64, 64, 64, 128)),
+            RenderLayers::layer(1),
+            TargetCamera(ui_camera),
+        )).with_children(|parent| {
+            // parent.spawn((
+            //     RenderLayers::layer(1),
+            //     Mesh3d(meshes.add(Cuboid::new(10.0, 10.0, 10.0))),
+            //     MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
+            //     Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.0,0.0,0.0)),
+            // ));
+
+            for part in &part_registry.parts {
+                let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("/home/kidofcubes/Downloads/shiggysharp.png").to_owned());
+                parent.spawn((
+                    Node {
+                        width: Val::Px(152.0),
+                        height: Val::Px(152.0),
+                        border: UiRect::all(Val::Px(12.0)),
+                        ..default()
+                    },
+                    PickingBehavior {
+                        should_block_lower: false,
+                        ..default()
+                    },
+                    // BorderColor(RED.into()),
+                    // BorderRadius::MAX,
+                    // Outline {
+                    //     width: Val::Px(3.0),
+                    //     offset: Val::Px(3.0),
+                    //     color: Color::WHITE,
+                    // },
+                )).with_child((
+                    Node {
+                        width: Val::Px(128.0),
+                        height: Val::Px(128.0),
+                        padding: UiRect::all(Val::Px(12.0)),
+                        ..default()
+                    },
+                    PickingBehavior {
+                        should_block_lower: false,
+                        ..default()
+                    },
+                    ImageNode::new(asset_server.load(AssetPath::from_path(&thumbnail_path))).with_mode(bevy::ui::widget::NodeImageMode::Auto),
+                    // Transform::from_scale(Vec3::new(0.5,0.5,0.5)),
+                    
+                )).with_child((
+                    Node {
+                        bottom: Val::Px(0.0),
+                        position_type: PositionType::Absolute,
+                        width: Val::Percent(100.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba_u8(0, 0, 0, 128)),
+                    Text::new(format!("{}",part.1.part_name)),
+                    TextFont {
+                        font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc"),
+                        font_size: 15.0, 
+                        ..default()
+                    },
+                    PickingBehavior {
+                        should_block_lower: false,
+                        ..default()
+                    },
+                ));
+            }
+
+        })
+    ;
+    
 }
+
+/// Updates the scroll position of scrollable nodes in response to mouse input
+pub fn update_scroll_position(
+    mut mouse_wheel_events: EventReader<MouseWheel>,
+    hover_map: Res<HoverMap>,
+    mut scrolled_node_query: Query<&mut ScrollPosition>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    for mouse_wheel_event in mouse_wheel_events.read() {
+        let (mut dx, mut dy) = match mouse_wheel_event.unit {
+            MouseScrollUnit::Line => (
+                mouse_wheel_event.x * 32.0,
+                mouse_wheel_event.y * 32.0,
+            ),
+            MouseScrollUnit::Pixel => (mouse_wheel_event.x, mouse_wheel_event.y),
+        };
+
+        if keyboard_input.pressed(KeyCode::ControlLeft)
+            || keyboard_input.pressed(KeyCode::ControlRight)
+        {
+            std::mem::swap(&mut dx, &mut dy);
+        }
+
+        for (_pointer, pointer_map) in hover_map.iter() {
+            for (entity, _hit) in pointer_map.iter() {
+                if let Ok(mut scroll_position) = scrolled_node_query.get_mut(*entity) {
+                    scroll_position.offset_x -= dx;
+                    scroll_position.offset_y -= dy;
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
 
 fn on_part_display_changed(
     mut text_color_query: Query<&mut TextColor>,
@@ -415,7 +645,6 @@ pub fn render_gizmos(
     // hovered: Query<(&BasePart,Option<&AdjustableHull>),With<Hovered>>,
     // selected: Query<(&BasePart,Option<&AdjustableHull>),With<Selected>>,
     // all_parts: Query<(&BasePart,Option<&AdjustableHull>)>,
-    camera_query: Single<(&Camera, &GlobalTransform)>,
     part_registry: Res<PartRegistry>,
     mut gizmo: Gizmos
 ){
@@ -450,18 +679,18 @@ pub fn render_gizmos(
                 let selected_part = all_parts.get(selected_entity).unwrap();
                 if selected_part.1.is_some() {
                     let collider = get_collider(selected_part.0, selected_part.1.as_deref(), part_registry.parts.get(&selected_part.0.id).unwrap());
-                    // let adjacents = with_corner_adjacent_adjustable_hulls((&collider,selected_part.1.unwrap()), &all_colliders);
-                    // 
-                    // for origin_side in AdjHullSide::VARIANTS{
-                    //     let Some(adjacent) = adjacents[*origin_side] else {continue;};
-                    //     gizmo.cuboid(all_colliders[adjacent.0].0, Color::srgb_u8(255, 0, 255));
-                    // }
+                    let adjacents = with_corner_adjacent_adjustable_hulls((&collider,selected_part.1.unwrap()), &all_colliders);
 
-                    let adjacents2 = adjacent_adjustable_hulls((&collider,selected_part.1.unwrap()), &all_colliders);
-                    
-                    for adjacent in adjacents2{
-                        gizmo.cuboid(all_colliders[adjacent.1.0].0, Color::srgb_u8(255, 0, 255));
+                    for origin_side in AdjHullSide::VARIANTS{
+                        let Some(adjacent) = adjacents[*origin_side] else {continue;};
+                        gizmo.cuboid(all_colliders[adjacent.0].0, Color::srgb_u8(255, 0, 255));
                     }
+
+                    // let adjacents2 = adjacent_adjustable_hulls((&collider,selected_part.1.unwrap()), &all_colliders);
+                    // 
+                    // for adjacent in adjacents2{
+                    //     gizmo.cuboid(all_colliders[adjacent.1.0].0, Color::srgb_u8(255, 0, 255));
+                    // }
                 }
             }
         }

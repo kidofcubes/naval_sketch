@@ -1,4 +1,4 @@
-use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::mesh::{Extrudable, Indices}, utils::HashMap, window::CursorGrabMode};
+use bevy::{asset::{AssetPath, RenderAssetUsages}, color::{palettes::tailwind::{CYAN_300, GRAY_300, YELLOW_300}, Color}, core_pipeline::msaa_writeback::MsaaWritebackPlugin, hierarchy::HierarchyEvent, input::mouse::AccumulatedMouseMotion, prelude::*, reflect::List, render::{mesh::{Extrudable, Indices}, view::RenderLayers}, utils::HashMap, window::CursorGrabMode};
 use dirs::cache_dir;
 use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, cam_movement::{advance_physics, grab_mouse, handle_input, interpolate_rendered_transform, move_player, spawn_player, spawn_text}, editor_ui::get_base_part_entity};
 use crate::parsing::{load_save, AdjustableHull, BasePart, HasBasePart, Part};
@@ -13,11 +13,23 @@ pub struct PartRegistry {
 
 pub struct PartData {
     pub id: i32,
-    pub armor: Option<i32>,
+    pub part_name: String,
+    pub part_description: String,
+    pub builder_class: i32, //-1 is not found/invalid
+    pub weapon_type: i32, //-1 is not found/invalid
+    pub nation: u32,
+    pub armor: i32,
+    pub density: f32,
+    pub price: i32,
+    pub volume: f32,
     pub center: Vec3,
     //collier is half lengths
     pub collider: Vec3,
-    pub model: PathBuf
+    pub weapon: Option<WeaponData>,
+    pub model: PathBuf,
+    pub thumbnail: Option<PathBuf>
+}
+pub struct WeaponData {
 }
 
 pub fn register_all_parts(
@@ -193,6 +205,7 @@ pub fn on_part_meshes_init(
     base_part_query: Query<&BasePart>,
     parent_query: Query<&Parent>,
     mut base_part_meshes_query: Query<&mut BasePartMeshes>,
+    layer_query: Query<&RenderLayers>,
     mut commands: Commands,
 ){
     let mut temp = bevy::utils::HashMap::new();
@@ -205,6 +218,10 @@ pub fn on_part_meshes_init(
                 temp.get_mut(&base_part_entity).unwrap().meshes.push(entity);
             }
             commands.get_entity(entity).unwrap().insert(BasePartMesh{base_part:base_part_entity});
+            if let Ok(layer) = layer_query.get(base_part_entity) {
+                commands.get_entity(entity).unwrap().insert(layer.clone());
+            }
+            commands.get_entity(entity).unwrap().insert(BasePartMesh{base_part:base_part_entity});
         }
     }
     for pair in temp {
@@ -212,15 +229,18 @@ pub fn on_part_meshes_init(
     }
 }
 
-pub fn place_part(
+pub fn place_part<'a>(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     asset_server: &Res<AssetServer>,
     part_registry: &Res<PartRegistry>,
-    commands: &mut Commands,
+    entity: &mut EntityCommands,
     part: &Part
-){
-    let entity: &mut EntityCommands = &mut commands.spawn((
+) {
+    // let mut entity: EntityCommands = commands.spawn((
+    //     
+    // ));
+    entity.insert((
         base_part_to_bevy_transform(part.base_part()),
         part.base_part().clone()
     ));
@@ -246,8 +266,8 @@ pub fn place_part(
         ));
     }else{
         //let asset_path = AssetPath::from(format!("/home/kidofcubes/Downloads/AssetRipper_linux_x64/NavalArtOut/PrefabHierarchyObject/{}.glb",part.base_part().id));
-         println!("looking for part with id {:?}",&part.base_part().id);
-         println!("loaded parts are {:?}",part_registry.parts.keys());
+         // println!("looking for part with id {:?}",&part.base_part().id);
+         // println!("loaded parts are {:?}",part_registry.parts.keys());
         let asset_path = AssetPath::from(part_registry.parts.get(&part.base_part().id).unwrap().model.clone());
         let mut handle = asset_server.get_handle(&asset_path);
         if handle.is_none() {

@@ -7,7 +7,7 @@ use rand::seq::IndexedRandom;
 use regex::Regex;
 use smol_str::SmolStr;
 
-use crate::{editor_actions::EditorActionEvent, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
+use crate::{cam_movement::EditorCamera, editor_actions::EditorActionEvent, editor_ui::{on_click, on_hover, on_part_changed, on_unhover, render_gizmos, spawn_ui, update_command_text, update_selected, CommandDisplayData, EditorUiPlugin, Hovered, PartAttributes, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, simple_closest_dist, to_touch}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, BasePartMesh, PartRegistry}};
 
 #[derive(Resource)]
 pub struct DebugGizmo{
@@ -288,7 +288,7 @@ fn execute_queued_commands(
 
 pub fn translate_floatings(
     mut editor_data: ResMut<EditorData>,
-    camera_query: Single<(&Camera, &GlobalTransform)>,
+    camera_query: Single<(&Camera, &GlobalTransform, &EditorCamera)>,
     windows: Single<&Window>,
     mut ray_cast: MeshRayCast,
     mut gizmo: Gizmos,
@@ -298,7 +298,7 @@ pub fn translate_floatings(
     part_registry: Res<PartRegistry>,
     key: Res<ButtonInput<KeyCode>>,
 ) {
-    let (camera, camera_transform) = *camera_query;
+    let (camera, camera_transform, _) = *camera_query;
 
     let Some(cursor_position) = windows.cursor_position() else {
         return;

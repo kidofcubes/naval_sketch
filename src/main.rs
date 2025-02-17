@@ -174,12 +174,13 @@ fn setup(
     println!("PLACING PARTS");
     if let Ok(parts) = parts_result {
         for part in parts {
+            let mut entity = commands.spawn_empty();
             place_part(
                 &mut meshes,
                 &mut materials,
                 &asset_server,
                 &part_registry,
-                &mut commands,
+                &mut entity,
                 &part);
         }
     }else{
@@ -189,7 +190,7 @@ fn setup(
                 &mut materials,
                 &asset_server,
                 &part_registry,
-                &mut commands,
+                &mut commands.spawn_empty(),
                 &Part::Normal(BasePart {
                     id: 5,
                     ignore_physics: false,
@@ -206,7 +207,7 @@ fn setup(
                 &mut materials,
                 &asset_server,
                 &part_registry,
-                &mut commands,
+                &mut commands.spawn_empty(),
                 &Part::Normal(BasePart {
                     id: 5,
                     ignore_physics: false,
@@ -322,14 +323,21 @@ fn main() {
                         ..default()
                     }),
                     ..default()
-                }),
+                }).set(
+                        AssetPlugin {
+                            watch_for_changes_override: Some(false),
+                            mode: AssetMode::Unprocessed,
+                            meta_check: bevy::asset::AssetMetaCheck::Never,
+                            ..default()
+                        }
+                ),
                 WireframePlugin,
                 CameraMovementPlugin,
                 MeshPickingPlugin,
                 EditorPlugin,
                 //OutlinePlugin,
                 ))
-        .add_systems(Startup, (register_all_parts.before(setup),setup))
+        .add_systems(Startup, ((register_all_parts,setup).chain()))
         .add_systems(Update, (temp_test_update, on_part_meshes_init))
 
 

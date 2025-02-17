@@ -6,7 +6,10 @@ use quick_xml::{events::{BytesStart}, Reader};
 use regex::Regex;
 use yaml_rust2::Yaml;
 
-use crate::{parsing::get_attribute_string, parts::PartData};
+use crate::{parsing::get_attribute_string, parts::{PartData, WeaponData}};
+
+
+//todo parse NavalArt_Data/Localization/parts.csv
 
 pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartData> {
     let mut parts: Vec<PartData> = Vec::new();
@@ -27,6 +30,7 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
 
     let parts_dir = unity_project_dir.join("ExportedProject").join("Assets").join("Resources").join("parts");
     let models_dir = primary_content_dir.join("Assets").join("PrefabHierarchyObject");
+    let thumbnails_dir = unity_project_dir.join("ExportedProject").join("Assets").join("Resources").join("images");
 
     let part_prefab_regex = Regex::new(r"^(\d+)\.prefab$").unwrap();
     for part_file in read_dir(parts_dir.clone()).unwrap() {
@@ -42,34 +46,15 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
             continue;
         }
 
+        let thumbnail_path = thumbnails_dir.join(prefab_path.path().file_stem().unwrap().to_str().unwrap().to_owned()+".png");
+        let mut thumbnail_path_option: Option<PathBuf> = None;
+        if thumbnail_path.exists() {
+            thumbnail_path_option = Some(thumbnail_path);
+        }
+
         let prefab = parse_prefab(&prefab_path.path());
 
-        let part_mono_behaviour = &prefab.components.iter().filter(|pair| {
-            if pair.0 != "MonoBehaviour" { return false; }
-            let Some(m_script) = pair.1.get("m_Script") else { return false; };
-            let Some(map) = m_script.as_hash() else { return false; };
-            let Some(file_id) = map.get(&Yaml::from_str("fileID")) else { return false; };
-            let Some(guid) = map.get(&Yaml::from_str("guid")) else { return false; };
-            let Some(type_num) = map.get(&Yaml::from_str("type")) else { return false; };
-            //println!("checking fileid {:?} guid {:?} type {:?}",file_id,guid,type_num);
-            //println!("of {:?}",pair.1);
-
-            return (file_id.as_i64()==Some(11500000))&&(guid.as_str()==Some("025b32fee4a7141deb25f3720956b98b"))&&(type_num.as_i64()==Some(3));
-        }).next().unwrap().1;
-
-        let box_collider = &prefab.components.iter().filter(|pair| {
-            return pair.0 == "BoxCollider"
-        }).next().unwrap().1;
-
-
-
-        parts.push( PartData {
-            id: part_mono_behaviour.get("id").unwrap().as_i64().unwrap() as i32,
-            armor: Some(part_mono_behaviour.get("armor").unwrap().as_i64().unwrap() as i32),
-            model: model_path,
-            collider: vec3_from_yaml(box_collider.get("m_Size").unwrap()),
-            center: vec3_from_yaml(box_collider.get("m_Center").unwrap()),
-        });
+        parts.push(load_prefab(&prefab, model_path, thumbnail_path_option, false));
     }
 
     return parts;
@@ -91,7 +76,89 @@ fn get_as_f32(value: &Yaml) -> f32{
         return value.as_f64().unwrap() as f32;
 
     }
+}
+fn get_option_as_str(value: Option<&Yaml>) -> String {
+    match value {
+        Some(yaml) => return get_as_str(yaml),
+        None => "".to_owned(),
+    }
+}
+fn get_as_str(value: &Yaml) -> String {
+    match value {
+        Yaml::Real(num) => format!("{}",num),
+        Yaml::Integer(num) => format!("{}",num),
+        Yaml::String(str) => str.to_owned(),
+        Yaml::Boolean(bool) => (if *bool {"True"}else{"False"}).to_owned(),
+        Yaml::Null => "".to_owned(),
+        _ => "".to_owned()
+    }
+}
 
+const BASE_PART_COMPONENT_GUID: &str = "025b32fee4a7141deb25f3720956b98b";
+const MOD_PART_COMPONENT_GUID: &str = "3ec293451970d5435a860c7692116d1d";
+const WEAPON_COMPONENT_GUID: &str = "ba97f7bd460ed4e540710e28d77a5180";
+
+
+
+fn get_monobehaviour<'a>(game_object: &'a GameObject, search_guid: &str) -> Option<&'a HashMap<String,Yaml>>{
+    let thing = game_object.components.iter().filter(|pair| {
+                if pair.0 != "MonoBehaviour" { return false; }
+                let Some(m_script) = pair.1.get("m_Script") else { return false; };
+                let Some(map) = m_script.as_hash() else { return false; };
+                let Some(file_id) = map.get(&Yaml::from_str("fileID")) else { return false; };
+                let Some(guid) = map.get(&Yaml::from_str("guid")) else { return false; };
+                let Some(type_num) = map.get(&Yaml::from_str("type")) else { return false; };
+                //println!("checking fileid {:?} guid {:?} type {:?}",file_id,guid,type_num);
+                //println!("of {:?}",pair.1);
+
+                return (file_id.as_i64()==Some(11500000))&&(guid.as_str()==Some(search_guid))&&(type_num.as_i64()==Some(3));
+            }).next();
+    if let Some(thing) = thing {
+        return Some(&thing.1);
+    }else{
+        return None;
+    }
+}
+
+//loads on a best effort basis
+fn load_prefab(prefab: &GameObject, model_path: PathBuf, thumbnail_path: Option<PathBuf>, modded: bool) -> PartData {
+    let part_mono_behaviour = get_monobehaviour(&prefab, if modded {MOD_PART_COMPONENT_GUID}else{BASE_PART_COMPONENT_GUID}).unwrap();
+    let weapon_mono_behaviour = get_monobehaviour(&prefab, if modded {WEAPON_COMPONENT_GUID}else{WEAPON_COMPONENT_GUID});
+
+    let box_collider = &prefab.components.iter().filter(|pair| {
+        return pair.0 == "BoxCollider"
+    }).next().unwrap().1;
+
+
+    // println!("THING IS {:?}",part_mono_behaviour);
+    // println!("doing {:?}",(part_mono_behaviour.get("partName")));
+    // println!("description is {:?}",part_mono_behaviour.get("partDescription"));
+    // println!("weapontype is {:?}",part_mono_behaviour.get("weaponType"));
+
+    let mut part_data = PartData {
+        id: part_mono_behaviour.get("id").unwrap().as_i64().unwrap() as i32,
+        part_name: get_option_as_str(part_mono_behaviour.get("partName")),
+        part_description: get_option_as_str(part_mono_behaviour.get("partDescription")),
+        armor: part_mono_behaviour.get("armor").unwrap().as_i64().unwrap() as i32,
+        density: get_as_f32(part_mono_behaviour.get("density").unwrap()),
+        builder_class: part_mono_behaviour.get("builderClass").unwrap_or(&Yaml::Integer(-1)).as_i64().unwrap() as i32,
+        weapon_type: part_mono_behaviour.get("weaponType").unwrap_or(&Yaml::Integer(-1)).as_i64().unwrap() as i32,
+        nation: part_mono_behaviour.get("nation").unwrap().as_i64().unwrap() as u32,
+        volume: get_as_f32(part_mono_behaviour.get("volume").unwrap()),
+        price: part_mono_behaviour.get("price").unwrap().as_i64().unwrap() as i32,
+        model: model_path,
+        thumbnail: thumbnail_path,
+        collider: vec3_from_yaml(box_collider.get("m_Size").unwrap()),
+        center: vec3_from_yaml(box_collider.get("m_Center").unwrap()),
+        weapon: None
+    };
+    if let Some(weapon_mono_behaviour) = weapon_mono_behaviour {
+        part_data.weapon = Some(WeaponData {
+
+        });
+    }
+
+    return part_data;
 }
 
 
@@ -180,6 +247,7 @@ pub fn get_workshop_parts(workshop_folder: &Path, cache_folder: &Path) -> Vec<Pa
 
 
         let models_dir = primary_content_dir.join("Assets").join("PrefabHierarchyObject");
+        let thumbnails_dir = unity_project_dir.join("ExportedProject").join("Assets").join("resources");
 
 
         for prefab_path in prefab_paths {
@@ -188,34 +256,15 @@ pub fn get_workshop_parts(workshop_folder: &Path, cache_folder: &Path) -> Vec<Pa
 
             let prefab = parse_prefab(&lowercased_path);
 
-            let part_mono_behaviour = &prefab.components.iter().filter(|pair| {
-                if pair.0 != "MonoBehaviour" { return false; }
-                let Some(m_script) = pair.1.get("m_Script") else { return false; };
-                let Some(map) = m_script.as_hash() else { return false; };
-                let Some(file_id) = map.get(&Yaml::from_str("fileID")) else { return false; };
-                let Some(guid) = map.get(&Yaml::from_str("guid")) else { return false; };
-                let Some(type_num) = map.get(&Yaml::from_str("type")) else { return false; };
-                //println!("checking fileid {:?} guid {:?} type {:?}",file_id,guid,type_num);
-                //println!("of {:?}",pair.1);
-
-                return (file_id.as_i64()==Some(11500000))&&(guid.as_str()==Some("3ec293451970d5435a860c7692116d1d"))&&(type_num.as_i64()==Some(3));
-            }).next().unwrap().1;
-
-            //println!("the MonoBehaviour is {:?}",part_mono_behaviour);
-            //
-            let box_collider = &prefab.components.iter().filter(|pair| {
-                return pair.0 == "BoxCollider"
-            }).next().unwrap().1;
-            
             let model_path = models_dir.join(prefab_path.file_stem().unwrap().to_str().unwrap().to_owned()+".glb");
+            let thumbnail_path = thumbnails_dir.join(format!("p{}.png",prefab_path.file_stem().unwrap().to_str().unwrap().to_owned()));
+            let mut thumbnail_path_option: Option<PathBuf> = None;
+            if thumbnail_path.exists() {
+                thumbnail_path_option = Some(thumbnail_path);
+            }
+
             if model_path.exists() {
-                parts.push( PartData {
-                    id: part_mono_behaviour.get("id").unwrap().as_i64().unwrap() as i32,
-                    armor: Some(part_mono_behaviour.get("armor").unwrap().as_i64().unwrap() as i32),
-                    model: model_path,
-                    collider: vec3_from_yaml(box_collider.get("m_Size").unwrap()),
-                    center: vec3_from_yaml(box_collider.get("m_Center").unwrap()),
-                });
+                parts.push(load_prefab(&prefab, model_path, thumbnail_path_option, true));
             }
         }
     }
