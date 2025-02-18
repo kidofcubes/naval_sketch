@@ -13,6 +13,7 @@ pub struct PartRegistry {
     pub parts: HashMap<i32,PartData>
 }
 
+#[derive(Debug, Clone)]
 pub struct PartData {
     pub id: i32,
     pub part_name: String,
@@ -31,6 +32,8 @@ pub struct PartData {
     pub model: PathBuf,
     pub thumbnail: Option<PathBuf>
 }
+
+#[derive(Debug, Copy, Clone)]
 pub struct WeaponData {
 }
 

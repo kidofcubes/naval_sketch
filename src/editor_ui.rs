@@ -1,8 +1,8 @@
 use core::f32;
 use std::{fmt::Display, iter::once, path::Path};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::Or, schedule::IntoSystemConfigs, world::{OnAdd, OnRemove}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
-use bevy_egui::{egui::{self, Color32, Context, FontData, FontDefinitions, RichText, TextEdit, Vec2b}, EguiContexts};
+use bevy::{app::{Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::Or, schedule::IntoSystemConfigs, system::Local, world::{OnAdd, OnRemove}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
+use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibility, Color32, Context, FontData, FontDefinitions, RichText, TextEdit, Vec2b}, EguiContexts};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 
@@ -60,19 +60,24 @@ impl Plugin for EditorUiPlugin {
                 history_text_display: None,
             }
         );
-        app.add_systems(Startup, setup_ui);
+        app.add_systems(Startup, setup_ui.after(register_all_parts));
         app.add_systems(Update, egui_update);
-        app.insert_resource(TestData { text: "".to_owned() } );
+        app.insert_resource(TestData { part_thumbnails: HashMap::new() } );
     }
 }
 
 
 #[derive(Resource)]
 pub struct TestData {
-    pub text: String,
+    //pub text: String,
+    pub part_thumbnails: HashMap<i32,Handle<Image>>
+
 }
 fn setup_ui(
     mut contexts: EguiContexts,
+    mut asset_server: ResMut<AssetServer>,
+    mut images: ResMut<TestData>,
+    part_registry: Res<PartRegistry>,
 ){
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert("my_font".to_owned(),
@@ -82,9 +87,16 @@ fn setup_ui(
        )
     );
     fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap()
-    .insert(0, "my_font".to_owned());
+        .insert(0, "my_font".to_owned());
 
     contexts.ctx_mut().set_fonts(fonts);
+
+    for part in &part_registry.parts {
+        let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("/home/kidofcubes/Downloads/shiggysharp.png").to_owned());
+        println!("ADDING PAT {:?}",part.0);
+        images.part_thumbnails.insert(*part.0,asset_server.load(thumbnail_path));
+    //             ui.image(thumbnail_path);
+    }
 
 
     //Context::set_fonts(, font_definitions);
@@ -95,9 +107,14 @@ fn setup_ui(
 fn egui_update(
     mut contexts: EguiContexts,
     mut editor_data: ResMut<EditorData>,
-    mut test_data: ResMut<TestData>,
+    mut images: ResMut<TestData>,
     mut all_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>, Option<&mut Turret>, Entity)>,
     selected: Query<Entity, With<Selected>>,
+    part_registry: Res<PartRegistry>,
+
+    mut rendered_texture_ids: Local<HashMap<i32,egui::TextureId>>,
+    mut is_initialized: Local<bool>,
+
     mut display_properties: ResMut<PropertiesDisplayData>
 ) {
     contexts.ctx_mut().memory(|mem|{
@@ -108,6 +125,18 @@ fn egui_update(
         }
 
     });
+    if !*is_initialized {
+        *is_initialized = true;
+        println!("the keys are {:?}",images.part_thumbnails.keys());
+        for part in &part_registry.parts {
+            println!("getting {:?} which is {:?}",part.0,images.part_thumbnails.get(part.0));
+            rendered_texture_ids.insert(
+                *part.0,contexts.add_image(
+                    images.part_thumbnails.get(part.0).unwrap().clone_weak()
+                )
+            );
+        }
+    }
 
     
 
@@ -151,6 +180,28 @@ fn egui_update(
             }
             
         });
+    egui::Window::new("Parts")
+        .resizable(Vec2b::new(true,true))
+        .scroll(Vec2b::new(true,true))
+        .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
+        .show(contexts.ctx_mut(), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for part in &part_registry.parts {
+                    //let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("/home/kidofcubes/Downloads/shiggysharp.png").to_owned());
+                    ui.image(
+                        SizedTexture::new(
+                            *rendered_texture_ids.get(part.0).unwrap(),
+                            bevy_egui::egui::Vec2::new(256.0,256.0)
+                        )
+                    );
+                }
+            });
+
+            
+
+
+        });
+
 }
 
 
@@ -177,6 +228,7 @@ pub fn spawn_ui(
     asset_server: Res<AssetServer>,
     mut font_data: ResMut<CommandDisplayData>,
     mut properties_display_data: ResMut<PropertiesDisplayData>,
+    mut images: ResMut<TestData>,
 
     editor_camera: Single<Entity, With<EditorCamera>>,
 
@@ -255,193 +307,193 @@ pub fn spawn_ui(
         })
     ;
 
-    //right properties panel
-    let font = TextFont {
-        //font: asset_server.load("/usr/share/fonts/TTF/CozetteVector.ttf"),
-        //font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
-        font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc"),
-        font_size: 20.0, 
-        ..default()
-    };
+    // //right properties panel
+    // let font = TextFont {
+    //     //font: asset_server.load("/usr/share/fonts/TTF/CozetteVector.ttf"),
+    //     //font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
+    //     font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc"),
+    //     font_size: 20.0, 
+    //     ..default()
+    // };
 
 
-    commands.spawn((
-        RenderLayers::layer(1),
-        Mesh3d(meshes.add(Cuboid::new(10.0, 10.0, 10.0))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
-        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.0,0.0,0.0)),
-    )); //???
-    
-    let part_offset = Vec3::new(0.0,0.0,0.0);
-    // for part in &part_registry.parts {
-    //     //println!("PARTS ARE {:?}",part_registry.parts.len());
-    //     let mut display_part = commands.spawn((
+    // commands.spawn((
+    //     RenderLayers::layer(1),
+    //     Mesh3d(meshes.add(Cuboid::new(10.0, 10.0, 10.0))),
+    //     MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
+    //     Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.0,0.0,0.0)),
+    // )); //???
+    // 
+    // let part_offset = Vec3::new(0.0,0.0,0.0);
+    // // for part in &part_registry.parts {
+    // //     //println!("PARTS ARE {:?}",part_registry.parts.len());
+    // //     let mut display_part = commands.spawn((
+    // //         RenderLayers::layer(1),
+    // //     ));
+    // //     let base_part = BasePart {
+    // //         id: *part.0,
+    // //         ignore_physics: false,
+    // //         position: part_offset.clone(),
+    // //         rotation: Vec3::ZERO,
+    // //         scale: Vec3 {x:1.0,y:1.0,z:1.0},
+    // //         color: Color::WHITE,
+    // //         armor: 0,
+    // //     };
+    // //
+    // //     let part: Part = 
+    // //         if let Some(weapon) = &part.1.weapon {
+    // //             Part::Turret(base_part, 
+    // //                 Turret {
+    // //                     manual_control: false,
+    // //                     elevator: None,
+    // //                 }
+    // //             )
+    // //
+    // //         }else{
+    // //             Part::Normal(base_part)
+    // //         };
+    // //     
+    // //     place_part(
+    // //         &mut meshes,
+    // //         &mut materials,
+    // //         &asset_server,
+    // //         &part_registry,
+    // //         &mut display_part,
+    // //         &part
+    // //     );
+    // //     part_offset+=Vec3::new(0.0,0.0,10.0);
+    // // }
+    // 
+    //
+    //
+    //
+    // let ui_camera = commands.spawn((
+    //     Camera3d {
+    //         ..default()
+    //     },
+    //     Projection::from(OrthographicProjection {
+    //         scaling_mode: bevy::render::camera::ScalingMode::Fixed { width: 512.0, height: 512.0 },
+    //         scale: 0.1,
+    //         ..OrthographicProjection::default_3d()
+    //     }),
+    //     Camera {
+    //         // renders after / on top of the main camera
+    //         order: 1,
+    //         clear_color: ClearColorConfig::None,
+    //         viewport: Some(Viewport {
+    //             physical_position: UVec2::new(0, 0),
+    //             physical_size: UVec2::new(512, 512),
+    //             ..default()
+    //         }),
+    //         
+    //
+    //         
+    //         ..default()
+    //     },
+    //     RenderLayers::layer(1),
+    //     Transform::from_xyz(0.0,100.0,100.0).looking_at(Vec3::ZERO, Vec3::Y),
+    // )).id();
+    //
+    // let mut light_transform = Transform::from_xyz(500.0, 500.0, 500.0);
+    // light_transform = light_transform.looking_at(Vec3 {x:0.0, y:0.0, z:0.0 }, Vec3::Y);
+    // // light
+    // commands.spawn((
+    //     DirectionalLight {
+    //         illuminance: 10000.0,
+    //         shadows_enabled: true,
+    //         ..default()
+    //     },
+    //     light_transform,
+    //     RenderLayers::layer(1),
+    // ));
+    //
+    //
+    //
+    //
+    // println!("the mode is {:?}",asset_server.mode());
+    //
+    // // parts browser
+    // commands
+    //     .spawn((Node {
+    //             position_type: PositionType::Absolute,
+    //             top: Val::Px(12.0),
+    //             left: Val::Px(12.0),
+    //             height: Val::Px(512.0),
+    //             width: Val::Px(512.0),
+    //             flex_direction: FlexDirection::Row,
+    //             flex_wrap: FlexWrap::Wrap,
+    //             flex_basis: Val::Px(512.0),
+    //             overflow: Overflow::scroll_y(),
+    //             ..default()
+    //         },
+    //         BackgroundColor(Color::srgba_u8(64, 64, 64, 128)),
     //         RenderLayers::layer(1),
-    //     ));
-    //     let base_part = BasePart {
-    //         id: *part.0,
-    //         ignore_physics: false,
-    //         position: part_offset.clone(),
-    //         rotation: Vec3::ZERO,
-    //         scale: Vec3 {x:1.0,y:1.0,z:1.0},
-    //         color: Color::WHITE,
-    //         armor: 0,
-    //     };
+    //         TargetCamera(ui_camera),
+    //     )).with_children(|parent| {
+    //         // parent.spawn((
+    //         //     RenderLayers::layer(1),
+    //         //     Mesh3d(meshes.add(Cuboid::new(10.0, 10.0, 10.0))),
+    //         //     MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
+    //         //     Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.0,0.0,0.0)),
+    //         // ));
     //
-    //     let part: Part = 
-    //         if let Some(weapon) = &part.1.weapon {
-    //             Part::Turret(base_part, 
-    //                 Turret {
-    //                     manual_control: false,
-    //                     elevator: None,
-    //                 }
-    //             )
+    //         for part in &part_registry.parts {
+    //             let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("/home/kidofcubes/Downloads/shiggysharp.png").to_owned());
+    //             parent.spawn((
+    //                 Node {
+    //                     width: Val::Px(152.0),
+    //                     height: Val::Px(152.0),
+    //                     border: UiRect::all(Val::Px(12.0)),
+    //                     ..default()
+    //                 },
+    //                 PickingBehavior {
+    //                     should_block_lower: false,
+    //                     ..default()
+    //                 },
+    //                 // BorderColor(RED.into()),
+    //                 // BorderRadius::MAX,
+    //                 // Outline {
+    //                 //     width: Val::Px(3.0),
+    //                 //     offset: Val::Px(3.0),
+    //                 //     color: Color::WHITE,
+    //                 // },
+    //             )).with_child((
+    //                 Node {
+    //                     width: Val::Px(128.0),
+    //                     height: Val::Px(128.0),
+    //                     padding: UiRect::all(Val::Px(12.0)),
+    //                     ..default()
+    //                 },
+    //                 PickingBehavior {
+    //                     should_block_lower: false,
+    //                     ..default()
+    //                 },
+    //                 ImageNode::new(asset_server.load(AssetPath::from_path(&thumbnail_path))).with_mode(bevy::ui::widget::NodeImageMode::Auto),
+    //                 // Transform::from_scale(Vec3::new(0.5,0.5,0.5)),
+    //                 
+    //             )).with_child((
+    //                 Node {
+    //                     bottom: Val::Px(0.0),
+    //                     position_type: PositionType::Absolute,
+    //                     width: Val::Percent(100.0),
+    //                     ..default()
+    //                 },
+    //                 BackgroundColor(Color::srgba_u8(0, 0, 0, 128)),
+    //                 Text::new(format!("{}",part.1.part_name)),
+    //                 TextFont {
+    //                     font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc"),
+    //                     font_size: 15.0, 
+    //                     ..default()
+    //                 },
+    //                 PickingBehavior {
+    //                     should_block_lower: false,
+    //                     ..default()
+    //                 },
+    //             ));
+    //         }
     //
-    //         }else{
-    //             Part::Normal(base_part)
-    //         };
-    //     
-    //     place_part(
-    //         &mut meshes,
-    //         &mut materials,
-    //         &asset_server,
-    //         &part_registry,
-    //         &mut display_part,
-    //         &part
-    //     );
-    //     part_offset+=Vec3::new(0.0,0.0,10.0);
-    // }
-    
-
-
-
-    let ui_camera = commands.spawn((
-        Camera3d {
-            ..default()
-        },
-        Projection::from(OrthographicProjection {
-            scaling_mode: bevy::render::camera::ScalingMode::Fixed { width: 512.0, height: 512.0 },
-            scale: 0.1,
-            ..OrthographicProjection::default_3d()
-        }),
-        Camera {
-            // renders after / on top of the main camera
-            order: 1,
-            clear_color: ClearColorConfig::None,
-            viewport: Some(Viewport {
-                physical_position: UVec2::new(0, 0),
-                physical_size: UVec2::new(512, 512),
-                ..default()
-            }),
-            
-
-            
-            ..default()
-        },
-        RenderLayers::layer(1),
-        Transform::from_xyz(0.0,100.0,100.0).looking_at(Vec3::ZERO, Vec3::Y),
-    )).id();
-
-    let mut light_transform = Transform::from_xyz(500.0, 500.0, 500.0);
-    light_transform = light_transform.looking_at(Vec3 {x:0.0, y:0.0, z:0.0 }, Vec3::Y);
-    // light
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 10000.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        light_transform,
-        RenderLayers::layer(1),
-    ));
-
-
-
-
-    println!("the mode is {:?}",asset_server.mode());
-
-    // parts browser
-    commands
-        .spawn((Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(12.0),
-                left: Val::Px(12.0),
-                height: Val::Px(512.0),
-                width: Val::Px(512.0),
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                flex_basis: Val::Px(512.0),
-                overflow: Overflow::scroll_y(),
-                ..default()
-            },
-            BackgroundColor(Color::srgba_u8(64, 64, 64, 128)),
-            RenderLayers::layer(1),
-            TargetCamera(ui_camera),
-        )).with_children(|parent| {
-            // parent.spawn((
-            //     RenderLayers::layer(1),
-            //     Mesh3d(meshes.add(Cuboid::new(10.0, 10.0, 10.0))),
-            //     MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
-            //     Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.0,0.0,0.0)),
-            // ));
-
-            for part in &part_registry.parts {
-                let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("/home/kidofcubes/Downloads/shiggysharp.png").to_owned());
-                parent.spawn((
-                    Node {
-                        width: Val::Px(152.0),
-                        height: Val::Px(152.0),
-                        border: UiRect::all(Val::Px(12.0)),
-                        ..default()
-                    },
-                    PickingBehavior {
-                        should_block_lower: false,
-                        ..default()
-                    },
-                    // BorderColor(RED.into()),
-                    // BorderRadius::MAX,
-                    // Outline {
-                    //     width: Val::Px(3.0),
-                    //     offset: Val::Px(3.0),
-                    //     color: Color::WHITE,
-                    // },
-                )).with_child((
-                    Node {
-                        width: Val::Px(128.0),
-                        height: Val::Px(128.0),
-                        padding: UiRect::all(Val::Px(12.0)),
-                        ..default()
-                    },
-                    PickingBehavior {
-                        should_block_lower: false,
-                        ..default()
-                    },
-                    ImageNode::new(asset_server.load(AssetPath::from_path(&thumbnail_path))).with_mode(bevy::ui::widget::NodeImageMode::Auto),
-                    // Transform::from_scale(Vec3::new(0.5,0.5,0.5)),
-                    
-                )).with_child((
-                    Node {
-                        bottom: Val::Px(0.0),
-                        position_type: PositionType::Absolute,
-                        width: Val::Percent(100.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba_u8(0, 0, 0, 128)),
-                    Text::new(format!("{}",part.1.part_name)),
-                    TextFont {
-                        font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc"),
-                        font_size: 15.0, 
-                        ..default()
-                    },
-                    PickingBehavior {
-                        should_block_lower: false,
-                        ..default()
-                    },
-                ));
-            }
-
-        })
-    ;
+    //     })
+    // ;
     
 }
 
