@@ -6,7 +6,7 @@ use bevy_egui::EguiContexts;
 use enum_collections::{EnumMap, Enumerated};
 use regex::Regex;
 
-use crate::{cam_movement::EditorCamera, editor_actions::EditorActionEvent, editor_ui::{on_part_changed, render_gizmos, update_command_text, update_selected, EditorUiPlugin}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart}, parts::{bevy_to_unity_translation, get_collider, BasePartMesh, PartRegistry}};
+use crate::{cam_movement::EditorCamera, editor_actions::{EditorActionEvent, EditorSettingChange}, editor_ui::{on_part_changed, render_gizmos, update_command_text, update_selected, EditorUiPlugin, Language}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart, Part}, parts::{bevy_to_unity_translation, get_collider, BasePartMesh, PartRegistry}};
 
 #[derive(Resource)]
 pub struct DebugGizmo{
@@ -51,7 +51,10 @@ impl Plugin for EditorPlugin {
                 action_history: Vec::new(),
                 queued_actions: VecDeque::new(),
                 floating: false,
+                clipboard: Vec::new(),
                 edit_near: true,
+                average_attributes: false,
+                language: Language::CN,
             }
         );
         app.insert_resource(
@@ -77,8 +80,13 @@ impl Plugin for EditorPlugin {
         command_tree.add_command(b"Q");
         command_tree.add_command(b"E");
 
+        command_tree.add_command(b"y");
+        command_tree.add_command(b"p");
+
         command_tree.add_command(b"f");
         command_tree.add_command(b"F");
+
+        command_tree.add_command(b"L");
 
         command_trees[CommandMode::Translation]=command_tree;
 
@@ -93,6 +101,8 @@ impl Plugin for EditorPlugin {
         command_tree.add_command(b"d");
 
         command_tree.add_command(b" ");
+
+        command_tree.add_command(b"L");
 
         command_trees[CommandMode::Attributes]=command_tree;
 
@@ -137,6 +147,9 @@ pub struct EditorData {
     pub queued_actions: VecDeque<EditorActionEvent>, //use deque?
     pub floating: bool,
     pub edit_near: bool,
+    pub clipboard: Vec<Part>,
+    pub language: Language,
+    pub average_attributes: bool,
 }
 
 #[derive(Resource)]
@@ -281,17 +294,7 @@ pub fn translate_floatings(
     };
 
     if editor_data.floating {
-        if selected_query.is_empty() { return; }
-        // let mut average_pos = Vec3::ZERO;
-        //
-        // for transform in &selected_query {
-        //     average_pos+=transform.0.translation;
-        // }
-        // average_pos/=selected_query.iter().len() as f32;
-
-        // if key.pressed(KeyCode::Space) {
-        //     editor_data.test_data = camera_transform.translation();
-        // }
+        if selected_query.iter().len() != 1 { return; }
 
         //let camera_translation = camera_transform.translation() + (camera_transform.forward()*10.0);
         let camera_translation = camera_transform.translation();
@@ -454,8 +457,13 @@ fn command_typing(
                                 "q" => {editor_data.queued_actions.push_front(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::NEG_Y, mult: mult });},
                                 "e" => {editor_data.queued_actions.push_front(EditorActionEvent::SmartMoveRelativeDir { dir: Dir3::Y, mult: mult });},
 
+                                "y" => {editor_data.queued_actions.push_front(EditorActionEvent::Copy {});},
+                                "p" => {editor_data.queued_actions.push_front(EditorActionEvent::Paste { selected: true });},
+
                                 "f" => {command_data.mode = CommandMode::Attributes}
-                                //"F" => {flip_floating=true;}
+
+                                //"F" => {editor_data.queued_actions.push_front(EditorActionEvent::SetEditorSetting { change: EditorSettingChange { floating: Some(), ..default()} });}
+                                "F" => {editor_data.floating = !editor_data.floating;}
                                 _ => {}
                             },
                             CommandMode::Attributes => match command_match.as_str() {
@@ -465,6 +473,15 @@ fn command_typing(
                                 "d" => {editor_data.queued_actions.push_front(EditorActionEvent::SwitchSelectedAttribute{offset:5 ,do_loop:false});},
 
                                 " " => {editor_data.queued_actions.push_front(EditorActionEvent::SetAttribute {attribute: None, value: mult.to_string()});},
+
+                                "L" => {
+                                    let orig_lang = editor_data.language.clone();
+                                    editor_data.queued_actions.push_front(EditorActionEvent::SetEditorSetting {
+                                        change: EditorSettingChange {language: Some(
+                                                    Language::VARIANTS[((Language::VARIANTS.iter().position(|x| *x==orig_lang).unwrap()+1)%Language::SIZE)]
+                                                ), ..default() }
+                                    });
+                                },
                                 _ => {}
                             },
                             CommandMode::Rotation => todo!(),

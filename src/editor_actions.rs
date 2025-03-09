@@ -1,10 +1,10 @@
 use core::f32;
 use std::ops::Deref;
 
-use bevy::{app::App, color::Color, ecs::event::Event, math::{Dir3, EulerRot, Isometry3d, Quat, Vec3}, prelude::{Camera, Entity, Gizmos, GlobalTransform, Query, Res, ResMut, Single, Transform, Trigger, With}, utils::HashMap};
+use bevy::{app::App, asset::{AssetServer, Assets}, color::Color, ecs::{event::Event, system::Commands}, math::{Dir3, EulerRot, Isometry3d, Quat, Vec3}, pbr::StandardMaterial, picking::mesh_picking::ray_cast::{MeshRayCast, RayCastSettings}, prelude::{Camera, Entity, Gizmos, GlobalTransform, Query, Res, ResMut, Single, Transform, Trigger, With}, render::mesh::Mesh, state::commands, utils::HashMap, window::Window};
 use enum_collections::Enumerated;
 
-use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, Selected}, editor_ui::PropertiesDisplayData, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{bevy_to_unity_translation, get_collider, unity_to_bevy_translation, PartAttributes, PartRegistry}};
+use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, Selected}, editor_ui::{Hovered, Language, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{bevy_to_unity_translation, get_collider, place_part, unity_to_bevy_translation, PartAttributes, PartRegistry}};
 
 
 #[derive(Event)]
@@ -13,6 +13,10 @@ pub enum EditorActionEvent {
     SmartMoveRelativeDir {dir: Dir3, mult: f32},
     SwitchSelectedAttribute {offset: i32, do_loop: bool},
     SetAttribute {attribute: Option<PartAttributes>, value: String},
+    SetEditorSetting {change: EditorSettingChange},
+    SpawnNewPart {part_id: i32, selected: bool, part: Option<Part>},
+    Copy {},
+    Paste {selected: bool},
 }
 
 pub fn add_actions(app: &mut App) {
@@ -20,6 +24,10 @@ pub fn add_actions(app: &mut App) {
     app.add_observer(smart_move_selected_relative_dir);
     app.add_observer(switch_selected_attribute);
     app.add_observer(modify_selected_attribute);
+    app.add_observer(set_editor_settings);
+    app.add_observer(spawn_new_part);
+    app.add_observer(copy);
+    app.add_observer(paste);
 }
 
 pub fn modify_selected_attribute(
@@ -36,12 +44,38 @@ pub fn modify_selected_attribute(
     let attribute = if attribute.is_some() {attribute.unwrap()}else{display_properties.selected};
 
     gizmos_debug.to_display.clear();
-    if editor_data.edit_near {
-        attribute.smart_set_field(&mut all_parts, &selected_parts, &part_registry, &value);
+    if editor_data.average_attributes {
+        if attribute.is_number() {
+            let Ok(value) = value.parse::<f32>() else {return;};
+
+            let mut average = 0.0;
+            for selected_entity in &selected_parts {
+                let selected_part = all_parts.get_mut(selected_entity).unwrap();
+                average += attribute.get_field(selected_part.0.deref(), selected_part.1.as_deref(), selected_part.2.as_deref()).unwrap().parse::<f32>().unwrap();
+            }
+            average /= selected_parts.iter().len() as f32;
+            let difference = value-average;
+
+            for selected_entity in &selected_parts {
+                let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
+                let orig = attribute.get_field(selected_part.0.deref(), selected_part.1.as_deref(), selected_part.2.as_deref()).unwrap().parse::<f32>().unwrap();
+
+                attribute.set_field(Some(selected_part.0.as_mut()), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &(orig+difference).to_string());
+            }
+        }else{
+            for selected_entity in &selected_parts {
+                let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
+                attribute.set_field(Some(selected_part.0.as_mut()), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value);
+            }
+        }
     }else{
-        for selected_entity in &selected_parts {
-            let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
-            attribute.set_field(Some(selected_part.0.as_mut()), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value);
+        if editor_data.edit_near {
+            attribute.smart_set_field(&mut all_parts, &selected_parts, &part_registry, &value);
+        }else{
+            for selected_entity in &selected_parts {
+                let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
+                attribute.set_field(Some(selected_part.0.as_mut()), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &value);
+            }
         }
     }
 
@@ -259,4 +293,214 @@ pub fn smart_move_selected_relative_dir(
         //
         // }
     }
+}
+
+
+#[derive(Default)]
+pub struct EditorSettingChange {
+    pub floating: Option<bool>,
+    pub edit_near: Option<bool>,
+    pub language: Option<Language>,
+}
+
+pub fn set_editor_settings(
+    trigger: Trigger<EditorActionEvent>,
+    mut editor_data: ResMut<EditorData>,
+){
+    let EditorActionEvent::SetEditorSetting{change} = trigger.event() else {return;};
+    if let Some(value) = change.floating { editor_data.floating = value; };
+    if let Some(value) = change.edit_near { editor_data.edit_near = value; };
+    if let Some(value) = change.language{ editor_data.language = value; };
+    
+}
+
+
+pub fn spawn_new_part(
+    trigger: Trigger<EditorActionEvent>,
+    mut editor_data: ResMut<EditorData>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    asset_server: Res<AssetServer>,
+    part_registry: Res<PartRegistry>,
+    camera_query: Single<(&Camera, &GlobalTransform, &EditorCamera)>,
+    windows: Single<&Window>,
+    hovered: Query<Entity, With<Hovered>>,
+    selected_entities: Query<Entity, With<Selected>>,
+    //mut ray_cast: MeshRayCast,
+    part_query: Query<(&mut BasePart,Option<&AdjustableHull>,&mut Transform)>,
+    mut commands: Commands,
+){
+    let EditorActionEvent::SpawnNewPart{part_id, selected, part} = trigger.event() else {return;};
+    let mut part_data;
+    if part.is_some() {
+        part_data = part.clone().unwrap();
+    } else {
+        let Some(part_entry) = part_registry.parts.get(part_id) else {return;}; 
+
+        if *part_id==0 { //adjustable hull
+            part_data = Part::AdjustableHull(BasePart::default(),AdjustableHull::default());
+            part_data.base_part_mut().id = *part_id;
+        }else if part_entry.weapon_type == 7 { //basic part
+            part_data = Part::Normal(BasePart::default());
+            part_data.base_part_mut().id = *part_id;
+        }else{ //weapon
+            part_data = Part::Turret(BasePart::default(), Turret { manual_control: false, elevator: None });
+            part_data.base_part_mut().id = *part_id;
+        }
+    };
+
+    let (camera, camera_transform, _) = *camera_query;
+    let camera_translation = camera_transform.translation();
+    let Some(cursor_position) = windows.cursor_position() else { return; };
+    // let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+    //     return;
+    // };
+    let mut dist:f32 = 100.0;
+    // let dir = Dir3::new_unchecked((ray.direction).normalize());
+    let dir = camera_transform.forward();
+
+    //let Some((hit_entity, hit)) = ray_cast.cast_ray(ray, &RayCastSettings::default()).first() else {return;};
+    
+    if let Ok(hovered_entity) = hovered.get_single() {
+        if let Ok(hit_entity_components) = part_query.get(hovered_entity) {
+            let a_adj_hull = if let Part::AdjustableHull(_,adj_hull) = part_data { Some(adj_hull) }else{None};
+            let mut a = get_collider(part_data.base_part(), a_adj_hull.as_ref(), part_registry.parts.get(part_id).unwrap());
+            a.translation=camera_translation+part_registry.parts.get(part_id).unwrap().center;
+
+            let b = get_collider(hit_entity_components.0, hit_entity_components.1, part_registry.parts.get(&hit_entity_components.0.id).unwrap());
+
+
+            dist=dist.min(to_touch(&a, &b, dir/* , &mut gizmo */));
+        }
+    }
+
+    let camera_translation = camera_transform.translation();
+    part_data.base_part_mut().position=bevy_to_unity_translation(&(camera_translation+((*dir)*dist)));
+    
+    if *selected {
+        for selected_entity in &selected_entities {
+            commands.entity(selected_entity).remove::<Selected>();
+        }
+    }
+    
+
+
+    let mut placed_part = commands.spawn_empty();
+    
+    place_part(
+        &mut meshes,
+        &mut materials,
+        &asset_server,
+        &part_registry,
+        &mut placed_part,
+        &part_data,
+    );
+    
+
+    if *selected {
+        placed_part.insert(Selected{});
+        editor_data.floating = true;
+    }
+
+
+}
+
+pub fn copy(
+    trigger: Trigger<EditorActionEvent>,
+    mut editor_data: ResMut<EditorData>,
+    selected_parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>), With<Selected>>,
+){
+    let EditorActionEvent::Copy{} = trigger.event() else {return;};
+
+    editor_data.clipboard.clear();
+    for selected_part in &selected_parts {
+        editor_data.clipboard.push(Part::from_optionals(selected_part));
+    }
+}
+
+
+pub fn paste(
+    trigger: Trigger<EditorActionEvent>,
+    mut editor_data: ResMut<EditorData>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    asset_server: Res<AssetServer>,
+    part_registry: Res<PartRegistry>,
+    camera_query: Single<(&Camera, &GlobalTransform, &EditorCamera)>,
+    windows: Single<&Window>,
+    hovered: Query<Entity, With<Hovered>>,
+    part_query: Query<(&mut BasePart,Option<&AdjustableHull>,&mut Transform)>,
+    selected_entities: Query<Entity, With<Selected>>,
+    mut commands: Commands,
+){
+    let EditorActionEvent::Paste{selected} = trigger.event() else {return;};
+
+    let mut translation: Vec3 = Vec3::new(0.0,0.0,0.0);
+    for to_paste in &editor_data.clipboard {
+        translation = translation + to_paste.base_part().position;
+    }
+    translation = translation / (editor_data.clipboard.len() as f32);
+
+    let mut dist:f32 = 100.0;
+    //let mut dir = camera_query.1.forward();
+
+    let (camera, camera_transform, _) = *camera_query;
+    let camera_translation = camera_transform.translation();
+
+    let Some(cursor_position) = windows.cursor_position() else { return; };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+        return;
+    };
+    let dir = Dir3::new_unchecked((ray.direction).normalize());
+
+    if editor_data.clipboard.len() == 1 {
+        let single_paste = editor_data.clipboard.first().unwrap();
+
+
+        if let Ok(hovered_entity) = hovered.get_single() {
+            if let Ok(hit_entity_components) = part_query.get(hovered_entity) {
+                let thing = single_paste.to_optionals();
+                let mut a = get_collider(thing.0, thing.1, part_registry.parts.get(&single_paste.base_part().id).unwrap());
+                a.translation=camera_translation+part_registry.parts.get(&single_paste.base_part().id).unwrap().center;
+
+                let b = get_collider(hit_entity_components.0, hit_entity_components.1, part_registry.parts.get(&hit_entity_components.0.id).unwrap());
+
+                dist=dist.min(to_touch(&a, &b, dir/* , &mut gizmo */));
+            }
+        }
+
+    }
+
+    
+
+    translation = bevy_to_unity_translation(&(&camera_translation + (dir*dist))) - translation;
+
+    if *selected {
+        for selected_entity in &selected_entities {
+            commands.entity(selected_entity).remove::<Selected>();
+        }
+    }
+
+    for to_paste in &editor_data.clipboard {
+        let mut to_place = to_paste.clone();
+        to_place.base_part_mut().position += translation;
+    
+        let mut placed_part = commands.spawn_empty();
+        place_part(
+            &mut meshes,
+            &mut materials,
+            &asset_server,
+            &part_registry,
+            &mut placed_part,
+            &to_place,
+        );
+        
+
+        if *selected {
+            placed_part.insert(Selected{});
+        }
+
+    }
+
+    
 }

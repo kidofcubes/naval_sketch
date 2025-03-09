@@ -1,15 +1,17 @@
-use std::{error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, ReadDir}, path::{Path, PathBuf}, time::Duration};
+use std::{error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, File, ReadDir}, path::{Path, PathBuf}, time::Duration};
 
 use bevy::{math::Vec3, reflect::List, utils::HashMap};
+use csv::StringRecord;
 use quick_xml::Reader;
 
 use regex::Regex;
 use yaml_rust2::Yaml;
 
-use crate::{parsing::get_attribute_string, parts::{PartData, WeaponData}};
+use crate::{editor_ui::Language, parsing::get_attribute_string, parts::{MultiLangString, PartData, WeaponData}};
 
 
 //todo parse NavalArt_Data/Localization/parts.csv
+
 
 pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartData> {
     let mut parts: Vec<PartData> = Vec::new();
@@ -27,6 +29,31 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
         create_dir_all(primary_content_dir.clone()).unwrap();
         extract_primary_content_to(&primary_content_dir);
     }
+
+    let part_names_path = game_folder.join("NavalArt_Data").join("Localization").join("parts.csv");
+    let part_descriptions_path = game_folder.join("NavalArt_Data").join("Localization").join("descriptions.csv");
+
+    let mut part_names_csv = csv::Reader::from_reader(File::open(part_names_path).unwrap());
+    let mut part_names: HashMap<i32,StringRecord> = HashMap::new();
+    for result in part_names_csv.records() {
+        let record = result.unwrap();
+        //println!("THING IS {:?}", record);
+        let part_id = (record.get(0).unwrap()[1..]).parse::<i32>().unwrap();
+        part_names.insert(part_id,record);
+    }
+
+
+    let mut part_descriptions: HashMap<i32,StringRecord> = HashMap::new();
+    let mut part_descriptions_csv = csv::Reader::from_reader(File::open(part_descriptions_path).unwrap());
+
+    for result in part_descriptions_csv.records() {
+        let record = result.unwrap();
+        //println!("THING IS {:?}", record);
+        let part_id = (record.get(0).unwrap()[1..]).parse::<i32>().unwrap();
+        part_descriptions.insert(part_id,record);
+    }
+
+
 
     let parts_dir = unity_project_dir.join("ExportedProject").join("Assets").join("Resources").join("parts");
     let models_dir = primary_content_dir.join("Assets").join("PrefabHierarchyObject");
@@ -53,8 +80,18 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
         }
 
         let prefab = parse_prefab(&prefab_path.path());
+        let mut part_data = load_prefab(&prefab, model_path, thumbnail_path_option, false);
+        if let Some(part_namez) = part_names.get(&part_data.id) {
+            if let Some(name) = part_namez.get(1) { part_data.part_name = part_data.part_name.with(Language::CN, name.to_owned()); }
+            if let Some(name) = part_namez.get(2) { part_data.part_name = part_data.part_name.with(Language::EN, name.to_owned()); }
+        }
 
-        parts.push(load_prefab(&prefab, model_path, thumbnail_path_option, false));
+        if let Some(part_descriptionz) = part_descriptions.get(&part_data.id) {
+            if let Some(name) = part_descriptionz.get(1) { part_data.part_description = part_data.part_description.with(Language::CN, name.to_owned()); }
+            if let Some(name) = part_descriptionz.get(2) { part_data.part_description = part_data.part_description.with(Language::EN, name.to_owned()); }
+        }
+
+        parts.push(part_data);
     }
 
     return parts;
@@ -134,11 +171,18 @@ fn load_prefab(prefab: &GameObject, model_path: PathBuf, thumbnail_path: Option<
     // println!("doing {:?}",(part_mono_behaviour.get("partName")));
     // println!("description is {:?}",part_mono_behaviour.get("partDescription"));
     // println!("weapontype is {:?}",part_mono_behaviour.get("weaponType"));
+    
+    let mut part_name = MultiLangString::default();
+    if let Some(yaml) = part_mono_behaviour.get("partName") { part_name = part_name.with(Language::UNSPECIFIED,get_as_str(yaml)); }
+
+    let mut part_description = MultiLangString::default();
+    if let Some(yaml) = part_mono_behaviour.get("partDescription") { part_description = part_description.with(Language::UNSPECIFIED,get_as_str(yaml)); }
+
 
     let mut part_data = PartData {
         id: part_mono_behaviour.get("id").unwrap().as_i64().unwrap() as i32,
-        part_name: get_option_as_str(part_mono_behaviour.get("partName")),
-        part_description: get_option_as_str(part_mono_behaviour.get("partDescription")),
+        part_name,
+        part_description,
         armor: part_mono_behaviour.get("armor").unwrap().as_i64().unwrap() as i32,
         density: get_as_f32(part_mono_behaviour.get("density").unwrap()),
         builder_class: part_mono_behaviour.get("builderClass").unwrap_or(&Yaml::Integer(-1)).as_i64().unwrap() as i32,

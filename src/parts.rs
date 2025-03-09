@@ -1,9 +1,9 @@
 use std::{fmt::Display, iter::once, ops::Deref, path::Path};
 use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, log::tracing_subscriber::filter::combinator::And, prelude::*, reflect::List, render::{mesh::Indices, view::RenderLayers}, utils::HashMap};
 use dirs::cache_dir;
-use enum_collections::Enumerated;
-use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, editor::Selected, editor_ui::get_base_part_entity, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret};
-use crate::parsing::{AdjustableHull, BasePart, HasBasePart, Part};
+use enum_collections::{EnumMap, Enumerated};
+use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, editor::Selected, editor_ui::{get_base_part_entity, Language}, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret};
+use crate::parsing::{AdjustableHull, BasePart, Part};
 use core::f32;
 use std::{fs::create_dir_all, path::PathBuf};
 
@@ -14,10 +14,41 @@ pub struct PartRegistry {
 }
 
 #[derive(Debug, Clone)]
+pub struct MultiLangString {
+    pub texts: EnumMap<Language,Option<String>,{Language::SIZE}>,
+}
+impl Default for MultiLangString {
+    fn default() -> Self {
+        MultiLangString { texts: EnumMap::new_option() }
+    }
+}
+impl MultiLangString {
+    pub fn of(lang: Language, text: String) -> Self {
+        MultiLangString::default().with(lang,text)
+    }
+
+    pub fn with(mut self, lang: Language, text: String) -> Self {
+        self.texts[lang] = Some(text);
+        return self;
+    }
+    pub fn get(&self, lang: Language) -> &str {
+        return self.texts[lang].as_deref().unwrap_or(self.get_fallback());
+    }
+    pub fn get_fallback(&self) -> &str {
+        for lang in Language::VARIANTS {
+            if let Some(text) = self.texts[*lang].as_ref() {
+                return text;
+            }
+        }
+        return "NO TEXT FOUND";
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PartData {
     pub id: i32,
-    pub part_name: String,
-    pub part_description: String,
+    pub part_name: MultiLangString,
+    pub part_description: MultiLangString,
     pub builder_class: i32, //-1 is not found/invalid
     pub weapon_type: i32, //-1 is not found/invalid
     pub nation: u32,
@@ -230,14 +261,15 @@ pub fn on_part_meshes_init(
             if let Ok(base_part_meshes) = &mut base_part_meshes_query.get_mut(base_part_entity) {
                 base_part_meshes.meshes.push(entity.0);
             }else{
-                temp.try_insert(base_part_entity, BasePartMeshes {meshes:Vec::new()});
+                temp.insert(base_part_entity, BasePartMeshes {meshes:Vec::new()});
                 temp.get_mut(&base_part_entity).unwrap().meshes.push(entity.0);
             }
             commands.get_entity(entity.0).unwrap().insert(BasePartMesh{base_part:base_part_entity});
-            if let Ok(layer) = layer_query.get(base_part_entity) {
-                commands.get_entity(entity.0).unwrap().insert(layer.clone());
-            }
-            commands.get_entity(entity.0).unwrap().insert(BasePartMesh{base_part:base_part_entity});
+
+            // if let Ok(layer) = layer_query.get(base_part_entity) {
+            //     commands.get_entity(entity.0).unwrap().insert(layer.clone());
+            // }
+
             entity.1.0 = materials.add(colored_part_material(base_part_query.get(base_part_entity).unwrap().color));
         }
     }

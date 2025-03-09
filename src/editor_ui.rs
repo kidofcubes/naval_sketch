@@ -1,8 +1,8 @@
 use core::f32;
 use std::{fmt::Display, iter::once, path::Path};
 
-use bevy::{app::{Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::Or, schedule::IntoSystemConfigs, system::Local, world::{OnAdd, OnRemove}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
-use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibility, Color32, Context, FontData, FontDefinitions, RichText, TextEdit, Vec2b}, EguiContexts};
+use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::Or, schedule::IntoSystemConfigs, system::Local, world::{OnAdd, OnRemove}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
+use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibility, Align, Color32, Context, FontData, FontDefinitions, ImageButton, Label, Layout, RichText, Sense, TextEdit, Vec2b, Widget}, EguiContexts};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 
@@ -25,18 +25,20 @@ impl Plugin for EditorUiPlugin {
         app.add_observer(
             |
                 trigger: Trigger<OnAdd, Selected>,
+                editor_data: Res<EditorData>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>), With<Selected>>,
                 mut text_query: Query<&mut Text>,
                 mut display_properties: ResMut<PropertiesDisplayData>
             | {
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().collect();
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
-                update_display_text(&selected_parts, &mut display_properties);
+                update_display_text(&selected_parts, editor_data.average_attributes, &mut display_properties);
             }
         );
         app.add_observer(
             |
                 trigger: Trigger<OnRemove, Selected>,
+                editor_data: Res<EditorData>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>, Entity), With<Selected>>,
                 mut text_query: Query<&mut Text>,
                 mut display_properties: ResMut<PropertiesDisplayData>
@@ -45,7 +47,7 @@ impl Plugin for EditorUiPlugin {
                     if part.3 == trigger.entity() { None } else { Some((part.0,part.1,part.2)) }
                 }).collect();
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
-                update_display_text(&selected_parts, &mut display_properties);
+                update_display_text(&selected_parts, editor_data.average_attributes, &mut display_properties);
             }
         );
         app.add_systems(Startup, spawn_ui.after(register_all_parts).after(spawn_player));
@@ -66,6 +68,12 @@ impl Plugin for EditorUiPlugin {
     }
 }
 
+#[derive(Enumerated, Debug, Copy, Clone, PartialEq)]
+pub enum Language {
+    CN,
+    EN,
+    UNSPECIFIED
+}
 
 #[derive(Resource)]
 pub struct TestData {
@@ -93,7 +101,7 @@ fn setup_ui(
 
     for part in &part_registry.parts {
         let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("/home/kidofcubes/Downloads/shiggysharp.png").to_owned());
-        println!("ADDING PAT {:?}",part.0);
+        // println!("ADDING PAT {:?}",part.0);
         images.part_thumbnails.insert(*part.0,asset_server.load(thumbnail_path));
     //             ui.image(thumbnail_path);
     }
@@ -127,9 +135,9 @@ fn egui_update(
     });
     if !*is_initialized {
         *is_initialized = true;
-        println!("the keys are {:?}",images.part_thumbnails.keys());
+        //println!("the keys are {:?}",images.part_thumbnails.keys());
         for part in &part_registry.parts {
-            println!("getting {:?} which is {:?}",part.0,images.part_thumbnails.get(part.0));
+            //println!("getting {:?} which is {:?}",part.0,images.part_thumbnails.get(part.0));
             rendered_texture_ids.insert(
                 *part.0,contexts.add_image(
                     images.part_thumbnails.get(part.0).unwrap().clone_weak()
@@ -140,7 +148,7 @@ fn egui_update(
 
     
 
-    egui::Window::new("Part Properties|设置")
+    egui::Window::new("Part Properties|零件设置")
         .resizable(Vec2b::new(false,false))
         // .max_width(f32::MAX)
         // .max_height(f32::MAX)
@@ -180,27 +188,55 @@ fn egui_update(
             }
             
         });
-    egui::Window::new("Parts")
+
+    egui::Window::new("Parts|零件")
         .resizable(Vec2b::new(true,true))
         .scroll(Vec2b::new(true,true))
         .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
         .show(contexts.ctx_mut(), |ui| {
-            ui.horizontal_wrapped(|ui| {
+            let layout = Layout::left_to_right(Align::TOP).with_main_wrap(true);
+            let initial_size = egui::Vec2::new(
+                ui.available_size_before_wrap().x,
+                ui.spacing().interact_size.y, // Assume there will be something interactive on the horizontal layout
+            );
+
+            let main_part = 
+            ui.allocate_ui_with_layout(initial_size,layout,|ui| {
                 for part in &part_registry.parts {
-                    //let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("/home/kidofcubes/Downloads/shiggysharp.png").to_owned());
-                    ui.image(
-                        SizedTexture::new(
-                            *rendered_texture_ids.get(part.0).unwrap(),
-                            bevy_egui::egui::Vec2::new(256.0,256.0)
-                        )
-                    );
+                    ui.allocate_ui_with_layout(egui::Vec2::new(256.0+32.0,256.0+32.0), Layout::top_down(Align::Center), |ui| {
+                        let texture = SizedTexture::new(
+                                *rendered_texture_ids.get(part.0).unwrap(),
+                                egui::Vec2::new(256.0,256.0)
+                            );
+                        let thing = ImageButton::new(texture).ui(ui);
+                        if thing.clicked() {
+                            println!("WTF CLICK");
+
+                            editor_data.queued_actions.push_front(
+                                EditorActionEvent::SpawnNewPart { part_id: *part.0, selected: true, part: None }
+                            );
+                        }
+                        ui.label(RichText::new(part.1.part_name.get(editor_data.language)));
+                        ui.set_max_height(256.0+32.0);
+                    }).response;
+                        
                 }
-            });
+            }).response;
+            //println!("the thing is {:?}",main_part.interact(Sense::click()).clicked());
 
             
 
 
         });
+
+    egui::Window::new("Settings|设置")
+        .resizable(Vec2b::new(false,false))
+        .show(contexts.ctx_mut(), |ui| {
+            ui.checkbox(&mut editor_data.floating, "floating");
+            ui.checkbox(&mut editor_data.edit_near, "edit_near");
+            ui.checkbox(&mut editor_data.average_attributes, "average_attributes");
+        });
+
 
 }
 
@@ -306,195 +342,6 @@ pub fn spawn_ui(
 
         })
     ;
-
-    // //right properties panel
-    // let font = TextFont {
-    //     //font: asset_server.load("/usr/share/fonts/TTF/CozetteVector.ttf"),
-    //     //font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
-    //     font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc"),
-    //     font_size: 20.0, 
-    //     ..default()
-    // };
-
-
-    // commands.spawn((
-    //     RenderLayers::layer(1),
-    //     Mesh3d(meshes.add(Cuboid::new(10.0, 10.0, 10.0))),
-    //     MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
-    //     Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.0,0.0,0.0)),
-    // )); //???
-    // 
-    // let part_offset = Vec3::new(0.0,0.0,0.0);
-    // // for part in &part_registry.parts {
-    // //     //println!("PARTS ARE {:?}",part_registry.parts.len());
-    // //     let mut display_part = commands.spawn((
-    // //         RenderLayers::layer(1),
-    // //     ));
-    // //     let base_part = BasePart {
-    // //         id: *part.0,
-    // //         ignore_physics: false,
-    // //         position: part_offset.clone(),
-    // //         rotation: Vec3::ZERO,
-    // //         scale: Vec3 {x:1.0,y:1.0,z:1.0},
-    // //         color: Color::WHITE,
-    // //         armor: 0,
-    // //     };
-    // //
-    // //     let part: Part = 
-    // //         if let Some(weapon) = &part.1.weapon {
-    // //             Part::Turret(base_part, 
-    // //                 Turret {
-    // //                     manual_control: false,
-    // //                     elevator: None,
-    // //                 }
-    // //             )
-    // //
-    // //         }else{
-    // //             Part::Normal(base_part)
-    // //         };
-    // //     
-    // //     place_part(
-    // //         &mut meshes,
-    // //         &mut materials,
-    // //         &asset_server,
-    // //         &part_registry,
-    // //         &mut display_part,
-    // //         &part
-    // //     );
-    // //     part_offset+=Vec3::new(0.0,0.0,10.0);
-    // // }
-    // 
-    //
-    //
-    //
-    // let ui_camera = commands.spawn((
-    //     Camera3d {
-    //         ..default()
-    //     },
-    //     Projection::from(OrthographicProjection {
-    //         scaling_mode: bevy::render::camera::ScalingMode::Fixed { width: 512.0, height: 512.0 },
-    //         scale: 0.1,
-    //         ..OrthographicProjection::default_3d()
-    //     }),
-    //     Camera {
-    //         // renders after / on top of the main camera
-    //         order: 1,
-    //         clear_color: ClearColorConfig::None,
-    //         viewport: Some(Viewport {
-    //             physical_position: UVec2::new(0, 0),
-    //             physical_size: UVec2::new(512, 512),
-    //             ..default()
-    //         }),
-    //         
-    //
-    //         
-    //         ..default()
-    //     },
-    //     RenderLayers::layer(1),
-    //     Transform::from_xyz(0.0,100.0,100.0).looking_at(Vec3::ZERO, Vec3::Y),
-    // )).id();
-    //
-    // let mut light_transform = Transform::from_xyz(500.0, 500.0, 500.0);
-    // light_transform = light_transform.looking_at(Vec3 {x:0.0, y:0.0, z:0.0 }, Vec3::Y);
-    // // light
-    // commands.spawn((
-    //     DirectionalLight {
-    //         illuminance: 10000.0,
-    //         shadows_enabled: true,
-    //         ..default()
-    //     },
-    //     light_transform,
-    //     RenderLayers::layer(1),
-    // ));
-    //
-    //
-    //
-    //
-    // println!("the mode is {:?}",asset_server.mode());
-    //
-    // // parts browser
-    // commands
-    //     .spawn((Node {
-    //             position_type: PositionType::Absolute,
-    //             top: Val::Px(12.0),
-    //             left: Val::Px(12.0),
-    //             height: Val::Px(512.0),
-    //             width: Val::Px(512.0),
-    //             flex_direction: FlexDirection::Row,
-    //             flex_wrap: FlexWrap::Wrap,
-    //             flex_basis: Val::Px(512.0),
-    //             overflow: Overflow::scroll_y(),
-    //             ..default()
-    //         },
-    //         BackgroundColor(Color::srgba_u8(64, 64, 64, 128)),
-    //         RenderLayers::layer(1),
-    //         TargetCamera(ui_camera),
-    //     )).with_children(|parent| {
-    //         // parent.spawn((
-    //         //     RenderLayers::layer(1),
-    //         //     Mesh3d(meshes.add(Cuboid::new(10.0, 10.0, 10.0))),
-    //         //     MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
-    //         //     Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.0,0.0,0.0)),
-    //         // ));
-    //
-    //         for part in &part_registry.parts {
-    //             let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("/home/kidofcubes/Downloads/shiggysharp.png").to_owned());
-    //             parent.spawn((
-    //                 Node {
-    //                     width: Val::Px(152.0),
-    //                     height: Val::Px(152.0),
-    //                     border: UiRect::all(Val::Px(12.0)),
-    //                     ..default()
-    //                 },
-    //                 PickingBehavior {
-    //                     should_block_lower: false,
-    //                     ..default()
-    //                 },
-    //                 // BorderColor(RED.into()),
-    //                 // BorderRadius::MAX,
-    //                 // Outline {
-    //                 //     width: Val::Px(3.0),
-    //                 //     offset: Val::Px(3.0),
-    //                 //     color: Color::WHITE,
-    //                 // },
-    //             )).with_child((
-    //                 Node {
-    //                     width: Val::Px(128.0),
-    //                     height: Val::Px(128.0),
-    //                     padding: UiRect::all(Val::Px(12.0)),
-    //                     ..default()
-    //                 },
-    //                 PickingBehavior {
-    //                     should_block_lower: false,
-    //                     ..default()
-    //                 },
-    //                 ImageNode::new(asset_server.load(AssetPath::from_path(&thumbnail_path))).with_mode(bevy::ui::widget::NodeImageMode::Auto),
-    //                 // Transform::from_scale(Vec3::new(0.5,0.5,0.5)),
-    //                 
-    //             )).with_child((
-    //                 Node {
-    //                     bottom: Val::Px(0.0),
-    //                     position_type: PositionType::Absolute,
-    //                     width: Val::Percent(100.0),
-    //                     ..default()
-    //                 },
-    //                 BackgroundColor(Color::srgba_u8(0, 0, 0, 128)),
-    //                 Text::new(format!("{}",part.1.part_name)),
-    //                 TextFont {
-    //                     font: asset_server.load("/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc"),
-    //                     font_size: 15.0, 
-    //                     ..default()
-    //                 },
-    //                 PickingBehavior {
-    //                     should_block_lower: false,
-    //                     ..default()
-    //                 },
-    //             ));
-    //         }
-    //
-    //     })
-    // ;
-    
 }
 
 /// Updates the scroll position of scrollable nodes in response to mouse input
@@ -730,6 +577,7 @@ pub fn on_part_changed(
     children_query: Query<&Children>,
     part_registry: Res<PartRegistry>,
     mut commands: Commands,
+    editor_data: Res<EditorData>,
 ){
     let mut has_changed = false;
     for mut pair in &mut changed_base_part {
@@ -751,32 +599,32 @@ pub fn on_part_changed(
 
             meshes_query.get_mut(pair.1).unwrap().0.0 = meshes.add(mesh);
         } else {
-            // TODO THIS IS STUPID
-            for child in children_query.iter_descendants(pair.1) {
-                commands.entity(child).despawn();
-            }
-            //commands.entity(pair.1).clear_children();
-
-
-            if let Some(new_part_data) = part_registry.parts.get(&parts.get(pair.1).unwrap().0.id) {
-                let asset_path = AssetPath::from(new_part_data.model.clone());
-                let mut handle = asset_server.get_handle(&asset_path);
-                if handle.is_none() {
-                    handle = Some(asset_server.load(
-                         GltfAssetLabel::Scene(0).from_asset(
-                             asset_path
-                         )
-                     ));
-                }
-
-                if let Ok(mut part_meshes) = base_part_meshes.get_mut(pair.1) {
-                    part_meshes.meshes.clear();
-                }
-                commands.entity(pair.1)
-                    .remove::<(SceneInstance,Children)>()
-                    .insert(SceneRoot(handle.unwrap()))
-                ;
-            }
+            // // TODO THIS IS STUPID
+            // for child in children_query.iter_descendants(pair.1) {
+            //     commands.entity(child).despawn();
+            // }
+            // //commands.entity(pair.1).clear_children();
+            //
+            //
+            // if let Some(new_part_data) = part_registry.parts.get(&parts.get(pair.1).unwrap().0.id) {
+            //     let asset_path = AssetPath::from(new_part_data.model.clone());
+            //     let mut handle = asset_server.get_handle(&asset_path);
+            //     if handle.is_none() {
+            //         handle = Some(asset_server.load(
+            //              GltfAssetLabel::Scene(0).from_asset(
+            //                  asset_path
+            //              )
+            //          ));
+            //     }
+            //
+            //     if let Ok(mut part_meshes) = base_part_meshes.get_mut(pair.1) {
+            //         part_meshes.meshes.clear();
+            //     }
+            //     commands.entity(pair.1)
+            //         .remove::<(SceneInstance,Children)>()
+            //         .insert(SceneRoot(handle.unwrap()))
+            //     ;
+            // }
             
         }
 
@@ -796,12 +644,13 @@ pub fn on_part_changed(
         selected_parts.push(parts.get(selected_part).unwrap());
     }
 
-    update_display_text(&selected_parts, &mut display_properties);
+    update_display_text(&selected_parts, editor_data.average_attributes, &mut display_properties);
 }
 
 
 pub fn update_display_text(
     parts: &[(&BasePart, Option<&AdjustableHull>, Option<&Turret>)],
+    average: bool,
     //text_query: &mut Query<&mut Text>,
     display_properties: &mut ResMut<PropertiesDisplayData>
 ){
@@ -820,21 +669,36 @@ pub fn update_display_text(
     }
 
     for attr in PartAttributes::VARIANTS {
-        display_properties.properties_text_buffers[*attr] = recompute_display_text(&selected_properties[*attr]);
+        display_properties.properties_text_buffers[*attr] = recompute_display_text(&selected_properties[*attr], attr, average);
     }
 }
 
 
 
-fn recompute_display_text(values: &Vec<String>) -> String {
+fn recompute_display_text(
+    values: &Vec<String>,
+    attribute: &PartAttributes,
+    average: bool
+) -> String {
     if values.is_empty() { return "???".to_owned(); }
-    let orig = values.first().unwrap();
-    for check in values {
-        if orig!=check {
-            return "XXX".to_owned();
+    if average && attribute.is_number() {
+        let mut average: f64 = 0.0;
+        for check in values {
+            if let Ok(num) = check.parse::<f32>() {
+                average += num as f64;
+            }
         }
+        average /= values.len() as f64;
+        return (average as f32).to_string();
+    } else {
+        let orig = values.first().unwrap();
+        for check in values {
+            if orig!=check {
+                return "XXX".to_owned();
+            }
+        }
+        return orig.to_owned();
     }
-    return orig.to_owned();
 }
 
 

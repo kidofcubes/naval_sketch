@@ -69,15 +69,15 @@ impl Default for BasePart {
 impl Default for AdjustableHull{
     fn default() -> AdjustableHull {
         AdjustableHull {
-            length:0.0,
-            height:0.0,
-            front_width:0.0,
-            back_width:0.0,
+            length:6.0,
+            height:6.0,
+            front_width:6.0,
+            back_width:6.0,
             front_spread:0.0,
             back_spread:0.0,
             top_roundness:0.0,
-            bottom_roundness:0.0,
-            height_scale:0.0,
+            bottom_roundness:1.0,
+            height_scale:1.0,
             height_offset:0.0
         }
     }
@@ -93,31 +93,44 @@ impl Default for Turret{
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Part {
     Normal(BasePart),
     AdjustableHull(BasePart,AdjustableHull),
     Turret(BasePart,Turret),
 }
 
-pub trait HasBasePart{
-    fn base_part(&self) -> &BasePart;
-    fn base_part_mut(&mut self) -> &mut BasePart;
-}
-
-impl HasBasePart for Part{
-    fn base_part(&self) -> &BasePart {
+impl Part{
+    pub fn base_part(&self) -> &BasePart {
         match self {
             Part::Normal(part) => part,
             Part::AdjustableHull(part,_) => part,
             Part::Turret(part,_) => part
         }
     }
-    fn base_part_mut(&mut self) -> &mut BasePart {
+    pub fn base_part_mut(&mut self) -> &mut BasePart {
         match self {
             Part::Normal(part) => part,
             Part::AdjustableHull(part,_) => part,
             Part::Turret(part,_) => part
+        }
+    }
+
+    pub fn from_optionals(components: (&BasePart, Option<&AdjustableHull>, Option<&Turret>)) -> Part {
+        if let Some(adjustable_hull) = components.1 {
+            Part::AdjustableHull(*components.0, *adjustable_hull)
+        } else if let Some(turret) = components.2 {
+            Part::Turret(*components.0, *turret)
+        } else {
+            Part::Normal(*components.0)
+        }
+    }
+
+    pub fn to_optionals(&self) -> (&BasePart, Option<&AdjustableHull>, Option<&Turret>) {
+        match self {
+            Part::Normal(part) => (part,None,None),
+            Part::AdjustableHull(part,adjustable_hull) => (part, Some(adjustable_hull), None),
+            Part::Turret(part,turret) => (part, None, Some(turret))
         }
     }
 }
