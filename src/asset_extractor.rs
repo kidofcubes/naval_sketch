@@ -10,9 +10,6 @@ use yaml_rust2::Yaml;
 use crate::{editor_ui::Language, parsing::get_attribute_string, parts::{MultiLangString, PartData, WeaponData}};
 
 
-//todo parse NavalArt_Data/Localization/parts.csv
-
-
 pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartData> {
     let mut parts: Vec<PartData> = Vec::new();
     let unity_project_dir = cache_folder.join("naval_art").join("unity_project_extracted");

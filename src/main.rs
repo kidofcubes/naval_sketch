@@ -145,7 +145,8 @@ fn temp_test_update(
 
 #[derive(Resource)]
 struct InitData {
-    file_path: String
+    file_path: String,
+    steam_path: String
 }
 
 #[derive(Resource)]
@@ -267,27 +268,17 @@ fn setup(
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let file_path = &args[1];
-
-    println!("wtfric {file_path}");
+    let steam_path = &args[1];
+    let file_path = &args[2];
 
     if file_path == "test" {
         
 
-
-        // App::new()
-        //     .add_plugins((
-        //             DefaultPlugins.build(),
-        //             CameraMovementPlugin,
-        //             ))
-        //     .add_systems(Update, (temp_test_update))
-        //
-        //
-        //     .run();
-
-
         App::new()
-            .insert_resource(InitData {file_path: file_path.to_string()})
+            .insert_resource(InitData {
+                file_path: file_path.to_string(),
+                steam_path: steam_path.to_string()
+            })
             .insert_resource(PartRegistry {parts: HashMap::new()})
             .add_plugins((
                     DefaultPlugins.build(),
@@ -307,7 +298,10 @@ fn main() {
 
 
     App::new()
-        .insert_resource(InitData {file_path: file_path.to_string()})
+        .insert_resource(InitData {
+            file_path: file_path.to_string(),
+            steam_path: steam_path.to_string()
+        })
         .insert_resource(PartRegistry {parts: HashMap::new()})
         .insert_resource(WireframeConfig {
             // The global wireframe config enables drawing of wireframes on every mesh,

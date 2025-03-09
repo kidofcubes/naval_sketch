@@ -53,7 +53,7 @@ impl Plugin for EditorPlugin {
                 floating: false,
                 clipboard: Vec::new(),
                 edit_near: true,
-                average_attributes: false,
+                group_edit_attributes: false,
                 language: Language::CN,
             }
         );
@@ -149,7 +149,7 @@ pub struct EditorData {
     pub edit_near: bool,
     pub clipboard: Vec<Part>,
     pub language: Language,
-    pub average_attributes: bool,
+    pub group_edit_attributes: bool,
 }
 
 #[derive(Resource)]

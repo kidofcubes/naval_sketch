@@ -44,7 +44,7 @@ pub fn modify_selected_attribute(
     let attribute = if attribute.is_some() {attribute.unwrap()}else{display_properties.selected};
 
     gizmos_debug.to_display.clear();
-    if editor_data.average_attributes {
+    if editor_data.group_edit_attributes {
         if attribute.is_number() {
             let Ok(value) = value.parse::<f32>() else {return;};
 

@@ -2,7 +2,7 @@ use std::{fmt::Display, iter::once, ops::Deref, path::Path};
 use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, log::tracing_subscriber::filter::combinator::And, prelude::*, reflect::List, render::{mesh::Indices, view::RenderLayers}, utils::HashMap};
 use dirs::cache_dir;
 use enum_collections::{EnumMap, Enumerated};
-use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, editor::Selected, editor_ui::{get_base_part_entity, Language}, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret};
+use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, editor::Selected, editor_ui::{get_base_part_entity, Language}, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret, InitData};
 use crate::parsing::{AdjustableHull, BasePart, Part};
 use core::f32;
 use std::{fs::create_dir_all, path::PathBuf};
@@ -69,10 +69,11 @@ pub struct WeaponData {
 }
 
 pub fn register_all_parts(
+    init_data: Res<InitData>,
     mut part_registry: ResMut<PartRegistry>
 ){
-    let cache_folder = cache_dir().unwrap().join("naval_fart");
-    let steam_folder = PathBuf::from("/home/kidofcubes/.local/share/Steam/");
+    let cache_folder = cache_dir().unwrap().join("naval_sketch");
+    let steam_folder = PathBuf::from(init_data.steam_path.clone());
     let workshop_folder = steam_folder.join("steamapps").join("workshop").join("content").join("842780");
     let game_folder = steam_folder.join("steamapps").join("common").join("NavalArt");
     create_dir_all(&cache_folder).unwrap();
@@ -314,9 +315,8 @@ pub fn place_part<'a>(
             MeshMaterial3d(materials.add(base_part.color))
         ));
     }else{
-        //let asset_path = AssetPath::from(format!("/home/kidofcubes/Downloads/AssetRipper_linux_x64/NavalArtOut/PrefabHierarchyObject/{}.glb",part.base_part().id));
-         // println!("looking for part with id {:?}",&part.base_part().id);
-         // println!("loaded parts are {:?}",part_registry.parts.keys());
+        // println!("looking for part with id {:?}",&part.base_part().id);
+        // println!("loaded parts are {:?}",part_registry.parts.keys());
         let asset_path = AssetPath::from(part_registry.parts.get(&part.base_part().id).unwrap().model.clone());
         let mut handle = asset_server.get_handle(&asset_path);
         if handle.is_none() {

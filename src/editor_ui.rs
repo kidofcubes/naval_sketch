@@ -32,7 +32,7 @@ impl Plugin for EditorUiPlugin {
             | {
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().collect();
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
-                update_display_text(&selected_parts, editor_data.average_attributes, &mut display_properties);
+                update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
             }
         );
         app.add_observer(
@@ -47,7 +47,7 @@ impl Plugin for EditorUiPlugin {
                     if part.3 == trigger.entity() { None } else { Some((part.0,part.1,part.2)) }
                 }).collect();
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
-                update_display_text(&selected_parts, editor_data.average_attributes, &mut display_properties);
+                update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
             }
         );
         app.add_systems(Startup, spawn_ui.after(register_all_parts).after(spawn_player));
@@ -100,7 +100,7 @@ fn setup_ui(
     contexts.ctx_mut().set_fonts(fonts);
 
     for part in &part_registry.parts {
-        let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("/home/kidofcubes/Downloads/shiggysharp.png").to_owned());
+        let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("no_texture.png").to_owned());
         // println!("ADDING PAT {:?}",part.0);
         images.part_thumbnails.insert(*part.0,asset_server.load(thumbnail_path));
     //             ui.image(thumbnail_path);
@@ -234,7 +234,7 @@ fn egui_update(
         .show(contexts.ctx_mut(), |ui| {
             ui.checkbox(&mut editor_data.floating, "floating");
             ui.checkbox(&mut editor_data.edit_near, "edit_near");
-            ui.checkbox(&mut editor_data.average_attributes, "average_attributes");
+            ui.checkbox(&mut editor_data.group_edit_attributes, "average_attributes");
         });
 
 
@@ -644,7 +644,7 @@ pub fn on_part_changed(
         selected_parts.push(parts.get(selected_part).unwrap());
     }
 
-    update_display_text(&selected_parts, editor_data.average_attributes, &mut display_properties);
+    update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
 }
 
 
