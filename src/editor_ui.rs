@@ -5,6 +5,7 @@ use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer
 use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibility, Align, Color32, Context, FontData, FontDefinitions, ImageButton, Label, Layout, RichText, Sense, TextEdit, Vec2b, Widget}, EguiContexts};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
+use transform_gizmo_bevy::GizmoTarget;
 
 use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMeshes, PartAttributes, PartRegistry}};
 
@@ -25,29 +26,42 @@ impl Plugin for EditorUiPlugin {
         app.add_observer(
             |
                 trigger: Trigger<OnAdd, Selected>,
-                editor_data: Res<EditorData>,
+                mut editor_data: ResMut<EditorData>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>), With<Selected>>,
                 mut text_query: Query<&mut Text>,
-                mut display_properties: ResMut<PropertiesDisplayData>
+                mut display_properties: ResMut<PropertiesDisplayData>,
+                mut commands: Commands,
             | {
+                editor_data.latest_selected = Some(trigger.entity());
+                
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().collect();
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
                 update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
+                commands.entity(trigger.entity()).insert(GizmoTarget::default());
             }
         );
         app.add_observer(
             |
                 trigger: Trigger<OnRemove, Selected>,
-                editor_data: Res<EditorData>,
+                mut editor_data: ResMut<EditorData>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>, Entity), With<Selected>>,
                 mut text_query: Query<&mut Text>,
-                mut display_properties: ResMut<PropertiesDisplayData>
+                mut display_properties: ResMut<PropertiesDisplayData>,
+                mut commands: Commands,
             | {
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().filter_map(|part| {
                     if part.3 == trigger.entity() { None } else { Some((part.0,part.1,part.2)) }
                 }).collect();
+
+                if let Some(latest_selected) = editor_data.latest_selected {
+                    if trigger.entity()==latest_selected {
+                        editor_data.latest_selected = None;
+                    }
+                }
+                
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
                 update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
+                commands.entity(trigger.entity()).remove::<GizmoTarget>();
             }
         );
         app.add_systems(Startup, spawn_ui.after(register_all_parts).after(spawn_player));
@@ -414,10 +428,21 @@ pub fn render_gizmos(
     for selected_entity in &selected {
         let selected = all_parts.get(selected_entity).unwrap();
         let selected_bounding_box = get_collider(selected.0, selected.1, part_registry.parts.get(&selected.0.id).unwrap());
-        gizmo.cuboid(
-            selected_bounding_box,
-            Color::srgb_u8(0, 255, 0)
-        );
+        let mut is_latest = false;
+        if let Some(latest_selected) = editor_data.latest_selected {
+            is_latest = latest_selected==selected_entity;
+        }
+        if is_latest {
+            gizmo.cuboid(
+                selected_bounding_box,
+                Color::srgb_u8(255, 0, 255)
+            );
+        }else{
+            gizmo.cuboid(
+                selected_bounding_box,
+                Color::srgb_u8(0, 255, 0)
+            );
+        }
     }
 
 
@@ -536,7 +561,6 @@ pub fn update_selected(
     material_query: Query<Entity, With<Mesh3d>>,
     added: Query<Entity, (With<BasePart>, Added<Selected>)>,
     mut removed: RemovedComponents<Selected>,
-    commands: Commands,
 ){
     removed.read().for_each(|base_entity| {
         for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
@@ -682,6 +706,14 @@ fn recompute_display_text(
 ) -> String {
     if values.is_empty() { return "???".to_owned(); }
     if average && attribute.is_number() {
+        if 
+            *attribute == PartAttributes::RotationX ||
+            *attribute == PartAttributes::RotationY ||
+            *attribute == PartAttributes::RotationZ
+        {
+            return 0.0.to_string();
+        }
+
         let mut average: f64 = 0.0;
         for check in values {
             if let Ok(num) = check.parse::<f32>() {

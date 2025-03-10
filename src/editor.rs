@@ -54,6 +54,7 @@ impl Plugin for EditorPlugin {
                 clipboard: Vec::new(),
                 edit_near: true,
                 group_edit_attributes: false,
+                latest_selected: None,
                 language: Language::CN,
             }
         );
@@ -150,6 +151,7 @@ pub struct EditorData {
     pub clipboard: Vec<Part>,
     pub language: Language,
     pub group_edit_attributes: bool,
+    pub latest_selected: Option<Entity>
 }
 
 #[derive(Resource)]

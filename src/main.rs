@@ -13,6 +13,7 @@ use cam_movement::CameraMovementPlugin;
 use editor::{EditorPlugin};
 use parsing::{load_save, AdjustableHull, BasePart, Part};
 use parts::{on_part_meshes_init, place_part, register_all_parts, BasePartMesh, BasePartMeshes, PartRegistry};
+use transform_gizmo_bevy::{GizmoHotkeys, GizmoOptions, TransformGizmoPlugin};
 use std::{env, path::Path};
 
 
@@ -312,6 +313,12 @@ fn main() {
             // Can be changed per mesh using the `WireframeColor` component.
             default_color: Color::WHITE,
         })
+
+        .insert_resource(GizmoOptions {
+            hotkeys: Some(GizmoHotkeys::default()),
+            ..default()
+        })
+
         .add_plugins((
                 DefaultPlugins.set(RenderPlugin {
                     render_creation: RenderCreation::Automatic(WgpuSettings {
@@ -333,7 +340,8 @@ fn main() {
                 MeshPickingPlugin,
                 EditorPlugin,
                 //OutlinePlugin,
-                EguiPlugin
+                EguiPlugin,
+                TransformGizmoPlugin
                 ))
         .add_systems(Startup, (register_all_parts,setup).chain())
         .add_systems(Update, (temp_test_update, on_part_meshes_init))

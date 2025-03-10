@@ -4,7 +4,7 @@ use std::ops::Deref;
 use bevy::{app::App, asset::{AssetServer, Assets}, color::Color, ecs::{event::Event, system::Commands}, math::{Dir3, EulerRot, Isometry3d, Quat, Vec3}, pbr::StandardMaterial, picking::mesh_picking::ray_cast::{MeshRayCast, RayCastSettings}, prelude::{Camera, Entity, Gizmos, GlobalTransform, Query, Res, ResMut, Single, Transform, Trigger, With}, render::mesh::Mesh, state::commands, utils::HashMap, window::Window};
 use enum_collections::Enumerated;
 
-use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, Selected}, editor_ui::{Hovered, Language, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{bevy_to_unity_translation, get_collider, place_part, unity_to_bevy_translation, PartAttributes, PartRegistry}};
+use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, Selected}, editor_ui::{Hovered, Language, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, get_collider, place_part, unity_to_bevy_quat, unity_to_bevy_translation, PartAttributes, PartRegistry}};
 
 
 #[derive(Event)]
@@ -48,19 +48,55 @@ pub fn modify_selected_attribute(
         if attribute.is_number() {
             let Ok(value) = value.parse::<f32>() else {return;};
 
-            let mut average = 0.0;
-            for selected_entity in &selected_parts {
-                let selected_part = all_parts.get_mut(selected_entity).unwrap();
-                average += attribute.get_field(selected_part.0.deref(), selected_part.1.as_deref(), selected_part.2.as_deref()).unwrap().parse::<f32>().unwrap();
-            }
-            average /= selected_parts.iter().len() as f32;
-            let difference = value-average;
+            if 
+                (
+                attribute == PartAttributes::RotationX ||
+                attribute == PartAttributes::RotationY ||
+                attribute == PartAttributes::RotationZ
+                ) && editor_data.latest_selected.is_some()
+            { //rotate around most recently selected
+                let latest_selected = editor_data.latest_selected.unwrap();
 
-            for selected_entity in &selected_parts {
-                let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
-                let orig = attribute.get_field(selected_part.0.deref(), selected_part.1.as_deref(), selected_part.2.as_deref()).unwrap().parse::<f32>().unwrap();
+                let mut rotation_vector = Vec3::new(0.0,0.0,0.0);
+                if attribute == PartAttributes::RotationX {
+                    rotation_vector.x = value;
+                }else if attribute == PartAttributes::RotationY {
+                    rotation_vector.y = value;
+                }else{
+                    rotation_vector.z = value;
+                }
 
-                attribute.set_field(Some(selected_part.0.as_mut()), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &(orig+difference).to_string());
+                let rotation = unity_to_bevy_quat(&rotation_vector);
+                let origin = unity_to_bevy_translation(&all_parts.get(latest_selected).unwrap().0.position);
+
+
+
+                for selected_entity in &selected_parts {
+                    let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
+                    let mut new_transform = base_part_to_bevy_transform(&selected_part.0);
+                    new_transform.rotate_around(origin, rotation);
+                    selected_part.0.position = bevy_to_unity_translation(&new_transform.translation);
+                    selected_part.0.rotation = bevy_quat_to_unity(&new_transform.rotation);
+                    
+                }
+                
+
+
+            } else {
+                let mut average = 0.0;
+                for selected_entity in &selected_parts {
+                    let selected_part = all_parts.get_mut(selected_entity).unwrap();
+                    average += attribute.get_field(selected_part.0.deref(), selected_part.1.as_deref(), selected_part.2.as_deref()).unwrap().parse::<f32>().unwrap();
+                }
+                average /= selected_parts.iter().len() as f32;
+                let difference = value-average;
+
+                for selected_entity in &selected_parts {
+                    let mut selected_part = all_parts.get_mut(selected_entity).unwrap();
+                    let orig = attribute.get_field(selected_part.0.deref(), selected_part.1.as_deref(), selected_part.2.as_deref()).unwrap().parse::<f32>().unwrap();
+
+                    attribute.set_field(Some(selected_part.0.as_mut()), selected_part.1.as_deref_mut(), selected_part.2.as_deref_mut(), &(orig+difference).to_string());
+                }
             }
         }else{
             for selected_entity in &selected_parts {

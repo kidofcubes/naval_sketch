@@ -360,24 +360,41 @@ pub fn base_part_to_bevy_transform(base_part: &BasePart) -> Transform{
                 base_part.position.x,
                 base_part.position.y,
                 base_part.position.z,
-            ).with_rotation(Quat::from_euler(
-                EulerRot::YXZ,
-                base_part.rotation.y.to_radians(),
-                base_part.rotation.x.to_radians(),
-                base_part.rotation.z.to_radians(),
-            ))
+            ).with_rotation(
+                unity_to_bevy_quat(&base_part.rotation)
+            )
             .with_scale(base_part.scale.abs()); //absed because yeah
 
-    let new_quat = Quat::from_xyzw(
-        -transform.rotation.x, 
-        transform.rotation.y, 
-        transform.rotation.z, 
-        -transform.rotation.w
-    );
     transform.translation.x = -transform.translation.x;
-    transform = transform.with_rotation(new_quat);
     return transform;
 }
+
+pub fn unity_to_bevy_quat(a: &Vec3) -> Quat{
+    let initial_quat = (Quat::from_euler(
+                EulerRot::YXZ,
+                a.y.to_radians(),
+                a.x.to_radians(),
+                a.z.to_radians(),
+            ));
+    return Quat::from_xyzw(
+        -initial_quat.x, 
+        initial_quat.y, 
+        initial_quat.z, 
+        -initial_quat.w
+    );
+}
+
+pub fn bevy_quat_to_unity(a: &Quat) -> Vec3{
+    let quat = Quat::from_xyzw(
+        -a.x, 
+        a.y, 
+        a.z, 
+        -a.w
+    );
+    let vec = Vec3::from(quat.to_euler(EulerRot::YXZ));
+    return Vec3::new(vec.y.to_degrees(), vec.x.to_degrees(), vec.z.to_degrees());
+}
+
 
 
 pub fn unity_to_bevy_translation(pos: &Vec3) -> Vec3{
