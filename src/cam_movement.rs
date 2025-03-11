@@ -1,4 +1,5 @@
 use bevy::{input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, pbr::ScreenSpaceAmbientOcclusion, picking::focus::HoverMap, prelude::*};
+use transform_gizmo_bevy::GizmoCamera;
 use std::f32::consts::FRAC_PI_2;
 
 /// A vector representing the player's input, accumulated over all frames that ran
@@ -70,6 +71,7 @@ pub fn spawn_player(mut commands: Commands) {
         PreviousPhysicalTranslation::default(),
         ScreenSpaceAmbientOcclusion::default(),
         EditorCamera,
+        GizmoCamera,
     ));
 }
 

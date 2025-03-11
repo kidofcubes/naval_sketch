@@ -1,13 +1,13 @@
 use core::f32;
 use std::{fmt::Display, iter::once, path::Path};
 
-use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::Or, schedule::IntoSystemConfigs, system::Local, world::{OnAdd, OnRemove}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
+use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::Or, schedule::IntoSystemConfigs, system::Local, world::{OnAdd, OnRemove, World}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, pointer::{PointerInteraction, PointerPress}, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
 use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibility, Align, Color32, Context, FontData, FontDefinitions, ImageButton, Label, Layout, RichText, Sense, TextEdit, Vec2b, Widget}, EguiContexts};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use transform_gizmo_bevy::GizmoTarget;
 
-use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMeshes, PartAttributes, PartRegistry}};
+use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMesh, BasePartMeshes, PartAttributes, PartRegistry}};
 
 pub struct EditorUiPlugin;
 
@@ -28,7 +28,6 @@ impl Plugin for EditorUiPlugin {
                 trigger: Trigger<OnAdd, Selected>,
                 mut editor_data: ResMut<EditorData>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>), With<Selected>>,
-                mut text_query: Query<&mut Text>,
                 mut display_properties: ResMut<PropertiesDisplayData>,
                 mut commands: Commands,
             | {
@@ -37,6 +36,7 @@ impl Plugin for EditorUiPlugin {
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().collect();
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
                 update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
+                println!("ADDED SELECTED");
                 commands.entity(trigger.entity()).insert(GizmoTarget::default());
             }
         );
@@ -45,7 +45,6 @@ impl Plugin for EditorUiPlugin {
                 trigger: Trigger<OnRemove, Selected>,
                 mut editor_data: ResMut<EditorData>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>, Entity), With<Selected>>,
-                mut text_query: Query<&mut Text>,
                 mut display_properties: ResMut<PropertiesDisplayData>,
                 mut commands: Commands,
             | {
@@ -61,6 +60,7 @@ impl Plugin for EditorUiPlugin {
                 
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
                 update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
+                println!("REMOVED SELECTED");
                 commands.entity(trigger.entity()).remove::<GizmoTarget>();
             }
         );
@@ -773,23 +773,47 @@ pub fn update_command_text(
     }
 }
 
+
+fn toggle_picking_enabled(
+    gizmo_targets: Query<&GizmoTarget>,
+    mut picking_settings: ResMut<PickingPlugin>,
+) {
+    // Picking is disabled when any of the gizmos is focused or active.
+
+    picking_settings.is_enabled = gizmo_targets
+        .iter()
+        .all(|target| !target.is_focused() && !target.is_active());
+}
+
+
+
+
 pub fn on_click(
     click: Trigger<Pointer<Down>>,
-    part_query: Query<&BasePart>,
-    parent_query: Query<&Parent>,
-    children_query: Query<&Children>,
-    material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    materials: ResMut<Assets<StandardMaterial>>,
+    base_part_query: Query<&BasePartMesh>,
     selected: Query<Entity, With<Selected>>,
+    parent_query: Query<&Parent>,
     key: Res<ButtonInput<KeyCode>>,
+    world: &World,
     mut commands: Commands,
 ){
     if click.event().button != PointerButton::Primary {
         return;
     }
-    if let Some(clicked) = get_base_part_entity(&parent_query, &part_query, click.entity()) {
+
+    for check_entity in once(click.entity()).chain(parent_query.iter_ancestors(click.entity())) {
         
-        if !key.pressed(KeyCode::ControlLeft) {
+        println!("first parent is {:#?}", world.inspect_entity(check_entity)
+                         .map(|info| info.name())
+                         .collect::<Vec<_>>());
+
+    }
+    if let Ok(base_part_mesh) = base_part_query.get(click.entity()) {
+        println!("CLICKED ON A THING");
+        let clicked = base_part_mesh.base_part;
+
+        
+        if (!key.pressed(KeyCode::ControlLeft)) && (!selected.contains(clicked)) {
             for thing in &selected {
                 commands.entity(thing).remove::<Selected>();
             }

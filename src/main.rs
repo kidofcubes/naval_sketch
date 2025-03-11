@@ -13,7 +13,7 @@ use cam_movement::CameraMovementPlugin;
 use editor::{EditorPlugin};
 use parsing::{load_save, AdjustableHull, BasePart, Part};
 use parts::{on_part_meshes_init, place_part, register_all_parts, BasePartMesh, BasePartMeshes, PartRegistry};
-use transform_gizmo_bevy::{GizmoHotkeys, GizmoOptions, TransformGizmoPlugin};
+use transform_gizmo_bevy::{GizmoHotkeys, GizmoOptions, GizmoVisuals, TransformGizmoPlugin};
 use std::{env, path::Path};
 
 
@@ -316,6 +316,10 @@ fn main() {
 
         .insert_resource(GizmoOptions {
             hotkeys: Some(GizmoHotkeys::default()),
+            visuals: GizmoVisuals {
+                inactive_alpha: 1.0,
+                ..default()
+            },
             ..default()
         })
 
