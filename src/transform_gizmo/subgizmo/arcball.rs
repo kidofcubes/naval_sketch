@@ -1,7 +1,7 @@
-use crate::math::{screen_to_world, DQuat, Pos2};
-use crate::subgizmo::common::{draw_circle, pick_circle};
-use crate::subgizmo::{SubGizmoConfig, SubGizmoKind};
-use crate::{config::PreparedGizmoConfig, gizmo::Ray, GizmoDrawData, GizmoResult};
+use super::super::math::{screen_to_world, DQuat, Pos2};
+use crate::transform_gizmo::subgizmo::common::{draw_circle, pick_circle};
+use crate::transform_gizmo::subgizmo::{SubGizmoConfig, SubGizmoKind};
+use crate::transform_gizmo::{config::PreparedGizmoConfig, gizmo::Ray, GizmoDrawData, GizmoResult};
 use ecolor::Color32;
 
 use super::common::PickResult;

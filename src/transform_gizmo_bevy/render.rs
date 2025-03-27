@@ -1,3 +1,26 @@
+use bevy::app::{App, Plugin};
+use bevy::asset::{load_internal_asset, Asset, AssetId, Handle};
+use bevy::core_pipeline::core_3d::{Transparent3d, CORE_3D_DEPTH_FORMAT};
+use bevy::core_pipeline::prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass,};
+use bevy::ecs::prelude::*;
+use bevy::ecs::query::ROQueryItem;
+use bevy::ecs::system::lifetimeless::{Read, SRes};
+use bevy::ecs::system::SystemParamItem;
+use bevy::image::BevyDefault as _;
+use bevy::pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup};
+use bevy::prelude::{Deref, DerefMut};
+use bevy::reflect::{Reflect, TypePath};
+use bevy::render::extract_component::ExtractComponent;
+use bevy::render::mesh::PrimitiveTopology;
+use bevy::render::prelude::*;
+use bevy::render::render_asset::{prepare_assets, PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages,RenderAssets,};
+use bevy::render::render_phase::{    AddRenderCommand, DrawFunctions, PhaseItem, PhaseItemExtraIndex, RenderCommand,    RenderCommandResult, SetItemPipeline, TrackedRenderPass, ViewSortedRenderPhases,};
+use bevy::render::render_resource::{    BlendState, Buffer, BufferInitDescriptor, BufferUsages, ColorTargetState, ColorWrites,    CompareFunction, DepthBiasState, DepthStencilState, FragmentState, IndexFormat,    MultisampleState, PipelineCache, PrimitiveState, RenderPipelineDescriptor,    SpecializedRenderPipeline, SpecializedRenderPipelines, StencilState, TextureFormat,    VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode,};
+use bevy::render::renderer::RenderDevice;
+use bevy::render::sync_world::TemporaryRenderEntity;
+use bevy::render::view::{ExtractedView, RenderLayers, ViewTarget};
+use bevy::render::{Extract, Render, RenderApp, RenderSet};
+use bevy::utils::{HashMap, HashSet};
 use bytemuck::cast_slice;
 use uuid::Uuid;
 
@@ -83,7 +106,7 @@ fn extract_gizmo_data(mut commands: Commands, handles: Extract<Res<DrawDataHandl
 }
 
 #[derive(Asset, Debug, Default, Clone, TypePath)]
-pub(crate) struct GizmoDrawData(pub(crate) transform_gizmo::GizmoDrawData);
+pub(crate) struct GizmoDrawData(pub(crate) crate::transform_gizmo::GizmoDrawData);
 
 #[derive(Debug, Clone)]
 pub(crate) struct GizmoBuffers {

@@ -1,12 +1,12 @@
 use std::f64::consts::TAU;
 
-use crate::math::{Pos2, Rect};
+use crate::transform_gizmo::math::{Pos2, Rect};
 use ecolor::Color32;
 use epaint::{Mesh, TessellationOptions, Tessellator, TextureId};
 pub(crate) use epaint::{PathStroke, Shape, Stroke};
 use glam::{DMat4, DVec3};
 
-use crate::math::world_to_screen;
+use crate::transform_gizmo::math::world_to_screen;
 
 const STEPS_PER_RAD: f64 = 20.0;
 

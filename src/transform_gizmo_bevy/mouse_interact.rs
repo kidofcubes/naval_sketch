@@ -1,8 +1,8 @@
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::{event::EventWriter, system::Res};
-use bevy_input::{mouse::MouseButton, ButtonInput};
+use bevy::app::{App, Plugin, Update};
+use bevy::ecs::{event::EventWriter, system::Res};
+use bevy::input::{mouse::MouseButton, ButtonInput};
 
-use crate::{GizmoDragStarted, GizmoDragging};
+use crate::transform_gizmo_bevy::{GizmoDragStarted, GizmoDragging};
 
 pub struct MouseGizmoInteractionPlugin;
 impl Plugin for MouseGizmoInteractionPlugin {

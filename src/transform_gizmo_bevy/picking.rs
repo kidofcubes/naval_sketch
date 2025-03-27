@@ -1,21 +1,21 @@
-use bevy_app::{Plugin, PreUpdate};
-use bevy_ecs::{
+use bevy::app::{Plugin, PreUpdate};
+use bevy::ecs::{
     event::EventWriter,
     schedule::IntoSystemConfigs,
     system::{Query, Res},
 };
-use bevy_picking::{
+use bevy::picking::{
     backend::{HitData, PointerHits},
     pointer::{PointerId, PointerLocation},
     PickSet,
 };
 
-use crate::GizmoStorage;
+use crate::transform_gizmo_bevy::GizmoStorage;
 
 pub struct TransformGizmoPickingPlugin;
 
 impl Plugin for TransformGizmoPickingPlugin {
-    fn build(&self, app: &mut bevy_app::App) {
+    fn build(&self, app: &mut bevy::app::App) {
         app.add_systems(PreUpdate, update_hits.in_set(PickSet::Backend));
     }
 }

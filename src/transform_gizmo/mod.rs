@@ -18,8 +18,8 @@
 //! For a more complete example, see the online demo at <https://urholaukkarinen.github.io/transform-gizmo/>.
 //! The demo sources can be found at <https://github.com/urholaukkarinen/transform-gizmo/blob/main/examples/bevy/src/main.rs>.
 
-mod shape;
-mod subgizmo;
+pub mod shape;
+pub mod subgizmo;
 
 pub mod config;
 pub mod gizmo;

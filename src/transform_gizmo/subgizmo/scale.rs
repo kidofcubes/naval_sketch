@@ -1,13 +1,13 @@
 use glam::DVec3;
 
-use crate::math::{round_to_interval, world_to_screen, Pos2};
+use crate::transform_gizmo::math::{round_to_interval, world_to_screen, Pos2};
 
-use crate::subgizmo::common::{
+use crate::transform_gizmo::subgizmo::common::{
     draw_arrow, draw_circle, draw_plane, gizmo_color, gizmo_local_normal, outer_circle_radius,
     pick_arrow, pick_circle, pick_plane, plane_bitangent, plane_tangent,
 };
-use crate::subgizmo::{common::TransformKind, SubGizmoConfig, SubGizmoKind};
-use crate::{gizmo::Ray, GizmoDirection, GizmoDrawData, GizmoMode, GizmoResult};
+use crate::transform_gizmo::subgizmo::{common::TransformKind, SubGizmoConfig, SubGizmoKind};
+use crate::transform_gizmo::{gizmo::Ray, GizmoDirection, GizmoDrawData, GizmoMode, GizmoResult};
 
 use super::common::PickResult;
 

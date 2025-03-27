@@ -1,5 +1,5 @@
-pub use crate::config::{GizmoConfig, GizmoDirection, GizmoMode, GizmoOrientation, GizmoVisuals};
-pub use crate::gizmo::{Gizmo, GizmoDrawData, GizmoInteraction, GizmoResult};
+pub use crate::transform_gizmo::config::{GizmoConfig, GizmoDirection, GizmoMode, GizmoOrientation, GizmoVisuals};
+pub use crate::transform_gizmo::gizmo::{Gizmo, GizmoDrawData, GizmoInteraction, GizmoResult};
 
 pub use enumset::{enum_set, EnumSet};
 

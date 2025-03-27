@@ -5,9 +5,11 @@ pub use ecolor::Color32;
 use emath::Rect;
 use enumset::{enum_set, EnumSet, EnumSetType};
 
-use crate::math::{
-    screen_to_world, world_to_screen, DMat4, DQuat, DVec3, DVec4, Transform, Vec4Swizzles,
+use bevy::math::{
+    DMat4, DQuat, DVec3, DVec4, Vec4Swizzles,
 };
+
+use super::math::{screen_to_world, world_to_screen, Transform};
 
 /// The default snapping distance for rotation in radians
 pub const DEFAULT_SNAP_ANGLE: f32 = std::f32::consts::PI / 32.0;

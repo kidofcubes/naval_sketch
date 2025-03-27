@@ -1,12 +1,12 @@
-use crate::math::{ray_to_plane_origin, segment_to_segment};
-use crate::GizmoMode;
+use crate::transform_gizmo::math::{ray_to_plane_origin, segment_to_segment};
+use crate::transform_gizmo::GizmoMode;
 use ecolor::Color32;
 use enumset::EnumSet;
+use glam::{DMat3, DMat4, DQuat, DVec3};
 use std::ops::{Add, RangeInclusive};
 
-use crate::shape::ShapeBuidler;
-use crate::{config::PreparedGizmoConfig, gizmo::Ray, GizmoDirection, GizmoDrawData};
-use glam::{DMat3, DMat4, DQuat, DVec3};
+use crate::transform_gizmo::shape::ShapeBuidler;
+use crate::transform_gizmo::{config::PreparedGizmoConfig, gizmo::Ray, GizmoDirection, GizmoDrawData};
 
 use super::Picked;
 

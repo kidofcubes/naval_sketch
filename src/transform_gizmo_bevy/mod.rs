@@ -28,7 +28,7 @@
 //!
 //! You can either set it up with [`App::insert_resource`] when creating your App, or at any point in a system with [`ResMut<GizmoOptions>`].
 
-use bevy::{app::{App, Last, Plugin}, asset::Assets, ecs::{component::Component, entity::Entity, event::{Event, EventReader}, query::{With, Without}, system::{Local, Query, Res, ResMut, Resource}}, input::{keyboard::KeyCode, mouse::MouseButton, ButtonInput}, math::{DQuat, DVec3, Vec2}, picking::focus::HoverMap, render::camera::Camera, transform::components::{GlobalTransform, Transform}, utils::HashMap, window::{PrimaryWindow, Window}};
+use bevy::{app::{App, Last, Plugin}, asset::{AssetApp, Assets}, ecs::{component::Component, entity::Entity, event::{Event, EventReader}, query::{With, Without}, schedule::IntoSystemConfigs, system::{Local, Query, Res, ResMut, Resource}}, input::{keyboard::KeyCode, mouse::MouseButton, ButtonInput}, math::{DQuat, DVec3, Vec2}, picking::focus::HoverMap, render::camera::Camera, transform::components::{GlobalTransform, Transform}, utils::HashMap, window::{PrimaryWindow, Window}};
 use enumset::enum_set;
 use mouse_interact::MouseGizmoInteractionPlugin;
 use picking::TransformGizmoPickingPlugin;
@@ -73,7 +73,7 @@ impl Plugin for TransformGizmoPlugin {
 
         #[cfg(feature = "gizmo_picking_backend")]
         app.add_plugins(TransformGizmoPickingPlugin);
-        #[cfg(feature = "mouse_interaction")]
+        // #[cfg(feature = "mouse_interaction")]
         app.add_plugins(MouseGizmoInteractionPlugin);
     }
 }
@@ -482,7 +482,10 @@ fn update_gizmos(
     let mut target_entities: Vec<Entity> = vec![];
     let mut target_transforms: Vec<Transform> = vec![];
 
-    for (entity, mut target_transform, mut gizmo_target) in &mut q_targets {
+    let mut sorted_query = q_targets.iter_mut().collect::<Vec<_>>();
+    sorted_query.sort_unstable_by_key(|a| a.0.index());
+
+    for (entity, mut target_transform, mut gizmo_target) in sorted_query {
         target_entities.push(entity);
         target_transforms.push(*target_transform);
 
@@ -543,7 +546,7 @@ fn update_gizmos(
             gizmo_interaction,
             target_transforms
                 .iter()
-                .map(|transform| transform_gizmo::math::Transform {
+                .map(|transform| crate::transform_gizmo::math::Transform {
                     translation: transform.translation.as_dvec3().into(),
                     rotation: transform.rotation.as_dquat().into(),
                     scale: transform.scale.as_dvec3().into(),

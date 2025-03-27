@@ -1,3 +1,1 @@
-pub use transform_gizmo::prelude::*;
-
-pub use crate::{GizmoCamera, GizmoOptions, GizmoTarget, TransformGizmoPlugin};
+pub use crate::transform_gizmo_bevy::{GizmoCamera, GizmoOptions, GizmoTarget, TransformGizmoPlugin};

@@ -1127,7 +1127,7 @@ checksum = "1c2650169161b64f9a93e41f13253701fdf971dc95265ed667d17bea6d2a334f"
 dependencies = [
  "bevy_reflect",
  "derive_more",
- "glam 0.29.2",
+ "glam",
  "itertools 0.13.0",
  "rand 0.8.5",
  "rand_distr",
@@ -1164,7 +1164,7 @@ version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "226f663401069ded4352ed1472a85bb1f43e2b7305d6a50e53a4f6508168e380"
 dependencies = [
- "glam 0.29.2",
+ "glam",
 ]
 
 [[package]]
@@ -1240,7 +1240,7 @@ dependencies = [
  "disqualified",
  "downcast-rs",
  "erased-serde",
- "glam 0.29.2",
+ "glam",
  "petgraph",
  "serde",
  "smallvec",
@@ -2489,7 +2489,7 @@ checksum = "b0a05902cf601ed11d564128448097b98ebe3c6574bd7b6a653a3d56d54aa020"
 dependencies = [
  "const_panic",
  "encase_derive",
- "glam 0.29.2",
+ "glam",
  "thiserror 1.0.69",
 ]
 
@@ -3029,17 +3029,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc46dd3ec48fdd8e693a98d2b8bafae273a2d54c1de02a2a7e3d57d501f39677"
 dependencies = [
  "bytemuck",
+ "mint",
  "rand 0.8.5",
  "serde",
-]
-
-[[package]]
-name = "glam"
-version = "0.30.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf3aa70d918d2b234126ff4f850f628f172542bf0603ded26b8ee36e5e22d5f9"
-dependencies = [
- "mint",
 ]
 
 [[package]]
@@ -3324,7 +3316,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c9e718d32b6e6b2b32354e1b0367025efdd0b11d6a740b905ddf5db1074679"
 dependencies = [
  "constgebra",
- "glam 0.29.2",
+ "glam",
  "tinyvec",
 ]
 
@@ -4179,7 +4171,7 @@ dependencies = [
  "enum_dispatch",
  "enumset",
  "epaint",
- "glam 0.30.1",
+ "glam",
  "mint",
  "quick-xml 0.37.2",
  "rand 0.9.0",
