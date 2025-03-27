@@ -20,8 +20,8 @@ transform-gizmo-bevy = "0.5.1"
 yaml-rust2 = "0.9.0"
 
 [patch.crates-io]
-transform-gizmo-bevy = { path = "../transform-gizmo/crates/transform-gizmo-bevy" }
-# transform-gizmo-bevy = { git = "https://github.com/jj136975/transform-gizmo.git" }
+# transform-gizmo-bevy = { path = "../transform-gizmo/crates/transform-gizmo-bevy" }
+transform-gizmo-bevy = { git = "https://github.com/jj136975/transform-gizmo.git" }
 
 
 # Enable max optimizations for dependencies, but not for our code:

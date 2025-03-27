@@ -7,7 +7,7 @@ use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use transform_gizmo_bevy::GizmoTarget;
 
-use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMesh, BasePartMeshes, PartAttributes, PartRegistry}};
+use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMesh, BasePartMeshes, PartAttributes, PartRegistry}};
 
 pub struct EditorUiPlugin;
 
@@ -22,7 +22,6 @@ impl Plugin for EditorUiPlugin {
 
         app.add_observer(on_hover);
         app.add_observer(on_unhover);
-        app.add_observer(on_click);
         app.add_observer(
             |
                 trigger: Trigger<OnAdd, Selected>,
@@ -36,7 +35,6 @@ impl Plugin for EditorUiPlugin {
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().collect();
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
                 update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
-                println!("ADDED SELECTED");
                 commands.entity(trigger.entity()).insert(GizmoTarget::default());
             }
         );
@@ -60,7 +58,6 @@ impl Plugin for EditorUiPlugin {
                 
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
                 update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
-                println!("REMOVED SELECTED");
                 commands.entity(trigger.entity()).remove::<GizmoTarget>();
             }
         );
@@ -545,7 +542,6 @@ pub fn render_gizmos(
 
 
 
-
 pub fn get_base_part_entity(parent_query: &Query<&Parent>, part_query: &Query<&BasePart>, entity: Entity) -> Option<Entity>{
     // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
     for base_entity in once(entity).chain(parent_query.iter_ancestors(entity)) {
@@ -586,90 +582,6 @@ pub fn update_selected(
     }
 }
 
-pub fn on_part_changed(
-    mut changed_base_part: Query<(&mut Transform, Entity), Or<(Changed<BasePart>,Changed<AdjustableHull>,Changed<Turret>)>>,
-    //parts: Query<(Ref<BasePart>, Option<Ref<AdjustableHull>>, Option<Ref<Turret>>)>,
-    parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)>,
-    mut base_part_meshes: Query<&mut BasePartMeshes>,
-    selected: Query<Entity, With<Selected>>,
-    mut display_properties: ResMut<PropertiesDisplayData>,
-
-    mut meshes_query: Query<(&mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    children_query: Query<&Children>,
-    part_registry: Res<PartRegistry>,
-    mut commands: Commands,
-    editor_data: Res<EditorData>,
-){
-    let mut has_changed = false;
-    for mut pair in &mut changed_base_part {
-        //println!("THE THING CHANGED OH MAI GAH {:?}",pair);
-        let new_transform =
-            base_part_to_bevy_transform(&parts.get(pair.1).unwrap().0);
-        pair.0.translation = new_transform.translation;
-        pair.0.rotation = new_transform.rotation;
-        pair.0.scale = new_transform.scale;
-        has_changed = true;
-
-        if let Some(adjustable_hull) = parts.get(pair.1).unwrap().1 {
-            let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD);
-            
-            generate_adjustable_hull_mesh(
-                &mut mesh,
-                adjustable_hull
-            );
-
-            meshes_query.get_mut(pair.1).unwrap().0.0 = meshes.add(mesh);
-        } else {
-            // // TODO THIS IS STUPID
-            // for child in children_query.iter_descendants(pair.1) {
-            //     commands.entity(child).despawn();
-            // }
-            // //commands.entity(pair.1).clear_children();
-            //
-            //
-            // if let Some(new_part_data) = part_registry.parts.get(&parts.get(pair.1).unwrap().0.id) {
-            //     let asset_path = AssetPath::from(new_part_data.model.clone());
-            //     let mut handle = asset_server.get_handle(&asset_path);
-            //     if handle.is_none() {
-            //         handle = Some(asset_server.load(
-            //              GltfAssetLabel::Scene(0).from_asset(
-            //                  asset_path
-            //              )
-            //          ));
-            //     }
-            //
-            //     if let Ok(mut part_meshes) = base_part_meshes.get_mut(pair.1) {
-            //         part_meshes.meshes.clear();
-            //     }
-            //     commands.entity(pair.1)
-            //         .remove::<(SceneInstance,Children)>()
-            //         .insert(SceneRoot(handle.unwrap()))
-            //     ;
-            // }
-            
-        }
-
-        if let Ok(part_meshes) = base_part_meshes.get(pair.1) {
-            for mesh_entity in &part_meshes.meshes {
-                meshes_query.get_mut(*mesh_entity).unwrap().1.0 = materials.add(colored_part_material(parts.get(pair.1).unwrap().0.color));
-            }
-        }
-
-
-
-    }
-    if !has_changed {return;}
-
-    let mut selected_parts = Vec::with_capacity(selected.iter().len());
-    for selected_part in &selected {
-        selected_parts.push(parts.get(selected_part).unwrap());
-    }
-
-    update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
-}
 
 
 pub fn update_display_text(
@@ -771,60 +683,6 @@ pub fn update_command_text(
 
         text_query.get_mut(command_display_data.history_text_display.unwrap()).unwrap().0 =history_text;
     }
-}
-
-
-fn toggle_picking_enabled(
-    gizmo_targets: Query<&GizmoTarget>,
-    mut picking_settings: ResMut<PickingPlugin>,
-) {
-    // Picking is disabled when any of the gizmos is focused or active.
-
-    picking_settings.is_enabled = gizmo_targets
-        .iter()
-        .all(|target| !target.is_focused() && !target.is_active());
-}
-
-
-
-
-pub fn on_click(
-    click: Trigger<Pointer<Down>>,
-    base_part_query: Query<&BasePartMesh>,
-    selected: Query<Entity, With<Selected>>,
-    parent_query: Query<&Parent>,
-    key: Res<ButtonInput<KeyCode>>,
-    world: &World,
-    mut commands: Commands,
-){
-    if click.event().button != PointerButton::Primary {
-        return;
-    }
-
-    for check_entity in once(click.entity()).chain(parent_query.iter_ancestors(click.entity())) {
-        
-        println!("first parent is {:#?}", world.inspect_entity(check_entity)
-                         .map(|info| info.name())
-                         .collect::<Vec<_>>());
-
-    }
-    if let Ok(base_part_mesh) = base_part_query.get(click.entity()) {
-        println!("CLICKED ON A THING");
-        let clicked = base_part_mesh.base_part;
-
-        
-        if (!key.pressed(KeyCode::ControlLeft)) && (!selected.contains(clicked)) {
-            for thing in &selected {
-                commands.entity(thing).remove::<Selected>();
-            }
-        }
-        
-        if selected.contains(clicked) {
-            commands.entity(clicked).remove::<Selected>();
-        }else{
-            commands.entity(clicked).insert(Selected{});
-        }
-    };
 }
 
 pub fn on_hover(

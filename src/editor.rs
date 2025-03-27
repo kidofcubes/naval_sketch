@@ -1,12 +1,16 @@
 use core::f32;
 use std::collections::VecDeque;
 
-use bevy::{app::{Plugin, Update}, color::Color, ecs::{event::EventCursor, system::SystemState, world::World}, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, math::{Dir3, Vec3}, prelude::{Camera, Component, Entity, Events, Gizmos, GlobalTransform, KeyCode, Local, MeshRayCast, Query, RayCastSettings, Res, ResMut, Resource, Single, Transform, With}, utils::{default, HashMap}, window::Window};
 use bevy_egui::EguiContexts;
 use enum_collections::{EnumMap, Enumerated};
 use regex::Regex;
 
-use crate::{cam_movement::EditorCamera, editor_actions::{EditorActionEvent, EditorSettingChange}, editor_ui::{on_part_changed, render_gizmos, update_command_text, update_selected, EditorUiPlugin, Language}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart, Part}, parts::{bevy_to_unity_translation, get_collider, BasePartMesh, PartRegistry}};
+use crate::{cam_movement::EditorCamera, editor_actions::{EditorActionEvent, EditorSettingChange}, editor_ui::{render_gizmos, update_command_text, update_display_text, update_selected, EditorUiPlugin, Language, PropertiesDisplayData}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, BasePartMesh, BasePartMeshes, PartRegistry}};
+use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::{EventCursor, EventReader, Events}, query::Or, schedule::IntoSystemConfigs, system::{Local, SystemState}, world::{OnAdd, OnRemove, World}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{keyboard::{Key, KeyboardInput}, mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Dir3, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, mesh_picking::ray_cast::{MeshRayCast, RayCastSettings}, pointer::{PointerInteraction, PointerPress}, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, transform::components::GlobalTransform, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}, window::Window};
+use rand::{rngs::SmallRng, Rng, SeedableRng};
+use transform_gizmo_bevy::GizmoTarget;
+
+
 
 #[derive(Resource)]
 pub struct DebugGizmo{
@@ -121,13 +125,14 @@ impl Plugin for EditorPlugin {
         app.add_systems(Update, (
                 translate_floatings,
                 update_selected,
-                on_part_changed,
+                (on_gizmo_update,on_part_changed).chain(),
                 command_typing,
                 update_command_text,
                 execute_queued_commands,
                 render_gizmos,
                 debug_gizmos
         ));
+        app.add_observer(on_click);
 
 
     }
@@ -514,4 +519,161 @@ fn command_typing(
         }
     }
 }
+
+pub fn on_gizmo_update(
+    // mut changed_gizmo_parts: Query<(&Transform, &mut BasePart, Entity), Changed<GizmoTarget>>,
+    // gizmo_targets: Query<&GizmoTarget>,
+
+    mut gizmo_parts: Query<(&Transform, &mut BasePart, &GizmoTarget)>,
+){
+    for mut gizmo_part in &mut gizmo_parts {
+        if gizmo_part.2.is_active() {
+
+            gizmo_part.1.position = bevy_to_unity_translation(&gizmo_part.0.translation);
+            gizmo_part.1.rotation = bevy_quat_to_unity(&gizmo_part.0.rotation);
+            println!("changed scale from {:?} to {:?}",gizmo_part.1.scale,gizmo_part.0.scale.abs());
+            gizmo_part.1.scale = gizmo_part.0.scale.abs();
+        }
+    }
+    // for mut changed_gizmo_part in &mut changed_gizmo_parts {
+    //     if let Some(latest_result) = gizmo_targets.get(changed_gizmo_part.2).unwrap().latest_result(){
+    //         //println!("the latest result is {:?}",latest_result);
+    //         changed_gizmo_part.1.position = bevy_to_unity_translation(&changed_gizmo_part.0.translation);
+    //         changed_gizmo_part.1.rotation = bevy_quat_to_unity(&changed_gizmo_part.0.rotation);
+    //         println!("changed scale from {:?} to {:?}",changed_gizmo_part.1.scale,changed_gizmo_part.0.scale.abs());
+    //         //changed_gizmo_part.1.scale = changed_gizmo_part.0.scale.abs();
+    //     }
+    // }
+}
+
+pub fn on_part_changed(
+    mut changed_base_part: Query<(&mut Transform, Entity), Or<(Changed<BasePart>,Changed<AdjustableHull>,Changed<Turret>)>>,
+    //parts: Query<(Ref<BasePart>, Option<Ref<AdjustableHull>>, Option<Ref<Turret>>)>,
+    parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)>,
+    mut base_part_meshes: Query<&mut BasePartMeshes>,
+    selected: Query<Entity, With<Selected>>,
+    mut display_properties: ResMut<PropertiesDisplayData>,
+
+    mut meshes_query: Query<(&mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    children_query: Query<&Children>,
+    part_registry: Res<PartRegistry>,
+    mut commands: Commands,
+    editor_data: Res<EditorData>,
+){
+    let mut has_changed = false;
+    for mut pair in &mut changed_base_part {
+        //println!("THE THING CHANGED OH MAI GAH {:?}",pair);
+        let new_transform =
+            base_part_to_bevy_transform(&parts.get(pair.1).unwrap().0);
+        pair.0.translation = new_transform.translation;
+        pair.0.rotation = new_transform.rotation;
+        pair.0.scale = new_transform.scale;
+        has_changed = true;
+
+        if let Some(adjustable_hull) = parts.get(pair.1).unwrap().1 {
+            let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD);
+            
+            generate_adjustable_hull_mesh(
+                &mut mesh,
+                adjustable_hull
+            );
+
+            meshes_query.get_mut(pair.1).unwrap().0.0 = meshes.add(mesh);
+        } else {
+            // // TODO THIS IS STUPID
+            // for child in children_query.iter_descendants(pair.1) {
+            //     commands.entity(child).despawn();
+            // }
+            // //commands.entity(pair.1).clear_children();
+            //
+            //
+            // if let Some(new_part_data) = part_registry.parts.get(&parts.get(pair.1).unwrap().0.id) {
+            //     let asset_path = AssetPath::from(new_part_data.model.clone());
+            //     let mut handle = asset_server.get_handle(&asset_path);
+            //     if handle.is_none() {
+            //         handle = Some(asset_server.load(
+            //              GltfAssetLabel::Scene(0).from_asset(
+            //                  asset_path
+            //              )
+            //          ));
+            //     }
+            //
+            //     if let Ok(mut part_meshes) = base_part_meshes.get_mut(pair.1) {
+            //         part_meshes.meshes.clear();
+            //     }
+            //     commands.entity(pair.1)
+            //         .remove::<(SceneInstance,Children)>()
+            //         .insert(SceneRoot(handle.unwrap()))
+            //     ;
+            // }
+            
+        }
+
+        if let Ok(part_meshes) = base_part_meshes.get(pair.1) {
+            for mesh_entity in &part_meshes.meshes {
+                meshes_query.get_mut(*mesh_entity).unwrap().1.0 = materials.add(colored_part_material(parts.get(pair.1).unwrap().0.color));
+            }
+        }
+
+
+
+    }
+    if !has_changed {return;}
+
+    let mut selected_parts = Vec::with_capacity(selected.iter().len());
+    for selected_part in &selected {
+        selected_parts.push(parts.get(selected_part).unwrap());
+    }
+
+    update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
+}
+
+
+pub fn on_click(
+    click: Trigger<Pointer<Down>>,
+    base_part_query: Query<&BasePartMesh>,
+    selected: Query<Entity, With<Selected>>,
+    parent_query: Query<&Parent>,
+    key: Res<ButtonInput<KeyCode>>,
+    gizmo_targets: Query<&GizmoTarget>,
+    world: &World,
+    mut commands: Commands,
+){
+    if click.event().button != PointerButton::Primary {
+        return;
+    }
+    if !gizmo_targets.iter().all(|target| !target.is_focused() && !target.is_active()) {
+        return;
+    }
+    
+        println!("first parent is {:#?}", world.inspect_entity(click.entity())
+                         .map(|info| info.name())
+                         .collect::<Vec<_>>());
+
+    for check_entity in std::iter::once(click.entity()).chain(parent_query.iter_ancestors(click.entity())) {
+        
+
+    }
+    if let Ok(base_part_mesh) = base_part_query.get(click.entity()) {
+        println!("CLICKED ON A THING");
+        let clicked = base_part_mesh.base_part;
+
+        
+        if (!key.pressed(KeyCode::ControlLeft)) && (!selected.contains(clicked)) {
+            for thing in &selected {
+                commands.entity(thing).remove::<Selected>();
+            }
+        }
+        
+        if selected.contains(clicked) {
+            commands.entity(clicked).remove::<Selected>();
+        }else{
+            commands.entity(clicked).insert(Selected{});
+        }
+    };
+}
+
 

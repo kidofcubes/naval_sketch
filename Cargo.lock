@@ -5681,6 +5681,7 @@ dependencies = [
 [[package]]
 name = "transform-gizmo"
 version = "0.5.1"
+source = "git+https://github.com/jj136975/transform-gizmo.git#7e346a12a8af0f5dc390ecbb105e3aae7d39c793"
 dependencies = [
  "ahash",
  "ecolor",
@@ -5695,6 +5696,7 @@ dependencies = [
 [[package]]
 name = "transform-gizmo-bevy"
 version = "0.5.1"
+source = "git+https://github.com/jj136975/transform-gizmo.git#7e346a12a8af0f5dc390ecbb105e3aae7d39c793"
 dependencies = [
  "bevy_app",
  "bevy_asset",
