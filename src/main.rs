@@ -6,6 +6,11 @@ mod parts;
 mod asset_extractor;
 mod editor_utils;
 mod editor_actions;
+mod transform_gizmo_bevy;
+mod transform_gizmo;
+// pub mod transform_gizmo_bevy {
+//     pub mod lib;
+// }
 
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::HashMap};
 use bevy_egui::EguiPlugin;
@@ -13,7 +18,7 @@ use cam_movement::CameraMovementPlugin;
 use editor::{EditorPlugin};
 use parsing::{load_save, AdjustableHull, BasePart, Part};
 use parts::{on_part_meshes_init, place_part, register_all_parts, BasePartMesh, BasePartMeshes, PartRegistry};
-use transform_gizmo_bevy::{GizmoHotkeys, GizmoOptions, GizmoVisuals, TransformGizmoPlugin};
+use transform_gizmo_bevy::{GizmoHotkeys, GizmoOptions, TransformGizmoPlugin};
 use std::{env, path::Path};
 
 
