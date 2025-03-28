@@ -5,7 +5,7 @@ use bevy_egui::EguiContexts;
 use enum_collections::{EnumMap, Enumerated};
 use regex::Regex;
 
-use crate::{cam_movement::EditorCamera, editor_actions::{EditorActionEvent, EditorSettingChange}, editor_ui::{render_gizmos, update_command_text, update_display_text, update_selected, EditorUiPlugin, Language, PropertiesDisplayData}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, BasePartMesh, BasePartMeshes, PartRegistry}, transform_gizmo_bevy::GizmoTarget};
+use crate::{cam_movement::EditorCamera, editor_actions::{EditorActionEvent, EditorSettingChange}, editor_ui::{render_gizmos, update_command_text, update_display_text, update_selected, EditorUiPlugin, Language, PropertiesDisplayData}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, BasePartMesh, BasePartMeshes, PartRegistry}, transform_gizmo::{config::TransformPivotPoint, GizmoOrientation}, transform_gizmo_bevy::{GizmoOptions, GizmoTarget}};
 use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::{EventCursor, EventReader, Events}, query::Or, schedule::IntoSystemConfigs, system::{Local, SystemState}, world::{OnAdd, OnRemove, World}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{keyboard::{Key, KeyboardInput}, mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Dir3, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, mesh_picking::ray_cast::{MeshRayCast, RayCastSettings}, pointer::{PointerInteraction, PointerPress}, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, transform::components::GlobalTransform, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}, window::Window};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 
@@ -53,12 +53,19 @@ impl Plugin for EditorPlugin {
             EditorData {
                 action_history: Vec::new(),
                 queued_actions: VecDeque::new(),
-                floating: false,
                 clipboard: Vec::new(),
-                edit_near: true,
-                group_edit_attributes: false,
                 latest_selected: None,
                 language: Language::CN,
+            }
+        );
+        app.insert_resource(
+            EditorOptions {
+                floating: false,
+                edit_near: true,
+                group_edit_attributes: false,
+                gizmos_activated: true,
+                group_gizmos: true,
+                local_gizmo: true,
             }
         );
         app.insert_resource(
@@ -150,12 +157,19 @@ pub enum CommandMode {
 pub struct EditorData {
     pub action_history: Vec<Action>,
     pub queued_actions: VecDeque<EditorActionEvent>, //use deque?
-    pub floating: bool,
-    pub edit_near: bool,
     pub clipboard: Vec<Part>,
     pub language: Language,
-    pub group_edit_attributes: bool,
     pub latest_selected: Option<Entity>
+}
+
+#[derive(Resource)]
+pub struct EditorOptions {
+    pub floating: bool,
+    pub edit_near: bool,
+    pub group_edit_attributes: bool,
+    pub gizmos_activated: bool,
+    pub group_gizmos: bool,
+    pub local_gizmo: bool,
 }
 
 #[derive(Resource)]
@@ -261,7 +275,7 @@ fn execute_queued_commands(
 }
 
 pub fn translate_floatings(
-    editor_data: ResMut<EditorData>,
+    editor_options: Res<EditorOptions>,
     camera_query: Single<(&Camera, &GlobalTransform, &EditorCamera)>,
     windows: Single<&Window>,
     mut ray_cast: MeshRayCast,
@@ -285,7 +299,7 @@ pub fn translate_floatings(
 
     let Some((hit_entity, hit)) = ray_cast.cast_ray(ray, &RayCastSettings {
         filter: &|entity| -> bool {
-            if editor_data.floating {
+            if editor_options.floating {
                 if let Ok(base_part_mesh) = base_part_mesh_query.get(entity) {
                     if selected_query.contains(base_part_mesh.base_part) {
                         return false;
@@ -299,7 +313,7 @@ pub fn translate_floatings(
         return;
     };
 
-    if editor_data.floating {
+    if editor_options.floating {
         if selected_query.iter().len() != 1 { return; }
 
         //let camera_translation = camera_transform.translation() + (camera_transform.forward()*10.0);
@@ -350,6 +364,7 @@ pub fn translate_floatings(
 fn command_typing(
     mut command_data: ResMut<CommandData>,
     mut editor_data: ResMut<EditorData>,
+    mut editor_options: ResMut<EditorOptions>,
     input_events: Res<Events<KeyboardInput>>,
     input_reader: Local<EventCursor<KeyboardInput>>,
     mut contexts: EguiContexts,
@@ -469,7 +484,7 @@ fn command_typing(
                                 "f" => {command_data.mode = CommandMode::Attributes}
 
                                 //"F" => {editor_data.queued_actions.push_front(EditorActionEvent::SetEditorSetting { change: EditorSettingChange { floating: Some(), ..default()} });}
-                                "F" => {editor_data.floating = !editor_data.floating;}
+                                "F" => {editor_options.floating = !editor_options.floating;}
                                 _ => {}
                             },
                             CommandMode::Attributes => match command_match.as_str() {
@@ -524,6 +539,9 @@ pub fn on_gizmo_update(
     // gizmo_targets: Query<&GizmoTarget>,
 
     mut gizmo_parts: Query<(&Transform, &mut BasePart, &GizmoTarget)>,
+    editor_data: Res<EditorData>,
+    editor_options: Res<EditorOptions>,
+    mut gizmo_options: ResMut<GizmoOptions>,
 ){
     for mut gizmo_part in &mut gizmo_parts {
         if gizmo_part.2.is_active() {
@@ -533,6 +551,20 @@ pub fn on_gizmo_update(
             // println!("changed scale from {:?} to {:?}",gizmo_part.1.scale,gizmo_part.0.scale.abs());
             gizmo_part.1.scale = gizmo_part.0.scale.abs();
         }
+    }
+    
+    gizmo_options.group_targets = editor_options.group_gizmos;
+    gizmo_options.gizmo_orientation = if editor_options.local_gizmo { GizmoOrientation::Local } else { GizmoOrientation::Global };
+    if gizmo_options.group_targets {
+        if let Some(entity) = editor_data.latest_selected {
+            if let Ok(thing) = gizmo_parts.get(entity) {
+                gizmo_options.pivot_point = TransformPivotPoint::Point(thing.0.translation.into());
+            }else{
+                gizmo_options.pivot_point = TransformPivotPoint::MedianPoint;
+            }
+        }
+    }else{
+        gizmo_options.pivot_point = TransformPivotPoint::MedianPoint;
     }
     // for mut changed_gizmo_part in &mut changed_gizmo_parts {
     //     if let Some(latest_result) = gizmo_targets.get(changed_gizmo_part.2).unwrap().latest_result(){
@@ -560,7 +592,7 @@ pub fn on_part_changed(
     children_query: Query<&Children>,
     part_registry: Res<PartRegistry>,
     mut commands: Commands,
-    editor_data: Res<EditorData>,
+    editor_options: Res<EditorOptions>,
 ){
     let mut has_changed = false;
     for mut pair in &mut changed_base_part {
@@ -627,7 +659,7 @@ pub fn on_part_changed(
         selected_parts.push(parts.get(selected_part).unwrap());
     }
 
-    update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
+    update_display_text(&selected_parts, editor_options.group_edit_attributes, &mut display_properties);
 }
 
 

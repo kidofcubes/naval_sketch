@@ -485,9 +485,10 @@ fn update_gizmos(
     let mut sorted_query = q_targets.iter_mut().collect::<Vec<_>>();
     sorted_query.sort_unstable_by_key(|a| a.0.index());
 
-    for (entity, mut target_transform, mut gizmo_target) in sorted_query {
+    for (entity, target_transform, gizmo_target) in &mut sorted_query {
+        let entity = *entity;
         target_entities.push(entity);
-        target_transforms.push(*target_transform);
+        target_transforms.push(**target_transform);
 
         if gizmo_options.group_targets {
             gizmo_storage
@@ -557,7 +558,8 @@ fn update_gizmos(
 
         let is_focused = gizmo.is_focused();
 
-        for (i, (_, mut target_transform, mut gizmo_target)) in q_targets.iter_mut().enumerate() {
+        let mut i=0;
+        for (_, mut target_transform, mut gizmo_target) in sorted_query {
             gizmo_target.is_active = gizmo_result.is_some();
             gizmo_target.is_focused = is_focused;
 
@@ -573,6 +575,7 @@ fn update_gizmos(
             }
 
             gizmo_target.latest_result = gizmo_result.as_ref().map(|(result, _)| *result);
+            i=i+1;
         }
     }
 

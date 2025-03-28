@@ -320,6 +320,8 @@ fn main() {
         .insert_resource(GizmoOptions {
             hotkeys: Some(GizmoHotkeys::default()),
             visuals: GizmoVisuals {
+                inactive_alpha: 0.6,
+                highlight_alpha: 0.8,
 
                 ..default()
             },

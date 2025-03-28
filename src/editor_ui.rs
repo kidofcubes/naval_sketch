@@ -5,7 +5,7 @@ use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer
 use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibility, Align, Color32, Context, FontData, FontDefinitions, ImageButton, Label, Layout, RichText, Sense, TextEdit, Vec2b, Widget}, EguiContexts};
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
-use crate::transform_gizmo_bevy::GizmoTarget;
+use crate::{editor::EditorOptions, transform_gizmo_bevy::GizmoTarget};
 
 use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMesh, BasePartMeshes, PartAttributes, PartRegistry}};
 
@@ -26,6 +26,7 @@ impl Plugin for EditorUiPlugin {
             |
                 trigger: Trigger<OnAdd, Selected>,
                 mut editor_data: ResMut<EditorData>,
+                editor_options: ResMut<EditorOptions>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>), With<Selected>>,
                 mut display_properties: ResMut<PropertiesDisplayData>,
                 mut commands: Commands,
@@ -34,7 +35,7 @@ impl Plugin for EditorUiPlugin {
                 
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().collect();
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
-                update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
+                update_display_text(&selected_parts, editor_options.group_edit_attributes, &mut display_properties);
                 commands.entity(trigger.entity()).insert(GizmoTarget::default());
             }
         );
@@ -42,6 +43,7 @@ impl Plugin for EditorUiPlugin {
             |
                 trigger: Trigger<OnRemove, Selected>,
                 mut editor_data: ResMut<EditorData>,
+                editor_options: ResMut<EditorOptions>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>, Entity), With<Selected>>,
                 mut display_properties: ResMut<PropertiesDisplayData>,
                 mut commands: Commands,
@@ -57,7 +59,7 @@ impl Plugin for EditorUiPlugin {
                 }
                 
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
-                update_display_text(&selected_parts, editor_data.group_edit_attributes, &mut display_properties);
+                update_display_text(&selected_parts, editor_options.group_edit_attributes, &mut display_properties);
                 commands.entity(trigger.entity()).remove::<GizmoTarget>();
             }
         );
@@ -126,6 +128,7 @@ fn setup_ui(
 fn egui_update(
     mut contexts: EguiContexts,
     mut editor_data: ResMut<EditorData>,
+    mut editor_options: ResMut<EditorOptions>,
     mut images: ResMut<TestData>,
     mut all_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>, Option<&mut Turret>, Entity)>,
     selected: Query<Entity, With<Selected>>,
@@ -243,9 +246,12 @@ fn egui_update(
     egui::Window::new("Settings|设置")
         .resizable(Vec2b::new(false,false))
         .show(contexts.ctx_mut(), |ui| {
-            ui.checkbox(&mut editor_data.floating, "floating");
-            ui.checkbox(&mut editor_data.edit_near, "edit_near");
-            ui.checkbox(&mut editor_data.group_edit_attributes, "average_attributes");
+            ui.checkbox(&mut editor_options.floating, "floating");
+            ui.checkbox(&mut editor_options.edit_near, "edit_near");
+            ui.checkbox(&mut editor_options.group_edit_attributes, "average_attributes");
+            ui.checkbox(&mut editor_options.local_gizmo, "local_gizmo");
+            ui.checkbox(&mut editor_options.group_gizmos, "group_gizmos");
+            ui.checkbox(&mut editor_options.gizmos_activated, "gizmos_activated");
         });
 
 
@@ -404,6 +410,7 @@ pub struct Hovered{}
 pub fn render_gizmos(
     command_data: Res<CommandData>,
     editor_data: Res<EditorData>,
+    editor_options: Res<EditorOptions>,
     display_properties: Res<PropertiesDisplayData>,
     selected: Query<Entity, With<Selected>>,
     //all_parts: Query<(&mut BasePart,Option<&mut AdjustableHull>)>,
@@ -444,7 +451,7 @@ pub fn render_gizmos(
 
 
     if command_data.mode==CommandMode::Attributes {
-        if editor_data.edit_near && display_properties.selected.is_adjustable_hull() {
+        if editor_options.edit_near && display_properties.selected.is_adjustable_hull() {
 
             let mut all_colliders: Vec<(Transform,AdjustableHull)> = Vec::new();
 
@@ -527,10 +534,10 @@ pub fn render_gizmos(
                             _ => panic!()
                         };
 
-                        gizmo.rect(thing, Vec2::ONE*2.0, color);
+                        // gizmo.rect(thing, Vec2::ONE*2.0, color);
 
                         thing.translation = (nearby_transform.translation-dotted_dist).into();
-                        gizmo.rect(thing, Vec2::ONE*2.0, color);
+                        // gizmo.rect(thing, Vec2::ONE*2.0, color);
                     }
                 }
             }

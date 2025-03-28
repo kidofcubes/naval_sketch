@@ -4,7 +4,7 @@ use std::ops::Deref;
 use bevy::{app::App, asset::{AssetServer, Assets}, color::Color, ecs::{event::Event, system::Commands}, math::{Dir3, EulerRot, Isometry3d, Quat, Vec3}, pbr::StandardMaterial, picking::mesh_picking::ray_cast::{MeshRayCast, RayCastSettings}, prelude::{Camera, Entity, Gizmos, GlobalTransform, Query, Res, ResMut, Single, Transform, Trigger, With}, render::mesh::Mesh, state::commands, utils::HashMap, window::Window};
 use enum_collections::Enumerated;
 
-use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, Selected}, editor_ui::{Hovered, Language, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, get_collider, place_part, unity_to_bevy_quat, unity_to_bevy_translation, PartAttributes, PartRegistry}};
+use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, EditorOptions, Selected}, editor_ui::{Hovered, Language, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, get_collider, place_part, unity_to_bevy_quat, unity_to_bevy_translation, PartAttributes, PartRegistry}};
 
 
 #[derive(Event)]
@@ -33,6 +33,7 @@ pub fn add_actions(app: &mut App) {
 pub fn modify_selected_attribute(
     trigger: Trigger<EditorActionEvent>,
     editor_data: Res<EditorData>,
+    editor_options: Res<EditorOptions>,
     part_registry: Res<PartRegistry>,
     display_properties: Res<PropertiesDisplayData>,
     mut gizmos_debug: ResMut<DebugGizmo>,
@@ -44,7 +45,7 @@ pub fn modify_selected_attribute(
     let attribute = if attribute.is_some() {attribute.unwrap()}else{display_properties.selected};
 
     gizmos_debug.to_display.clear();
-    if editor_data.group_edit_attributes {
+    if editor_options.group_edit_attributes {
         if attribute.is_number() {
             let Ok(value) = value.parse::<f32>() else {return;};
 
@@ -105,7 +106,7 @@ pub fn modify_selected_attribute(
             }
         }
     }else{
-        if editor_data.edit_near {
+        if editor_options.edit_near {
             attribute.smart_set_field(&mut all_parts, &selected_parts, &part_registry, &value);
         }else{
             for selected_entity in &selected_parts {
@@ -341,11 +342,12 @@ pub struct EditorSettingChange {
 
 pub fn set_editor_settings(
     trigger: Trigger<EditorActionEvent>,
+    mut editor_options: ResMut<EditorOptions>,
     mut editor_data: ResMut<EditorData>,
 ){
     let EditorActionEvent::SetEditorSetting{change} = trigger.event() else {return;};
-    if let Some(value) = change.floating { editor_data.floating = value; };
-    if let Some(value) = change.edit_near { editor_data.edit_near = value; };
+    if let Some(value) = change.floating { editor_options.floating = value; };
+    if let Some(value) = change.edit_near { editor_options.edit_near = value; };
     if let Some(value) = change.language{ editor_data.language = value; };
     
 }
@@ -353,7 +355,7 @@ pub fn set_editor_settings(
 
 pub fn spawn_new_part(
     trigger: Trigger<EditorActionEvent>,
-    mut editor_data: ResMut<EditorData>,
+    mut editor_options: ResMut<EditorOptions>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     asset_server: Res<AssetServer>,
@@ -435,7 +437,7 @@ pub fn spawn_new_part(
 
     if *selected {
         placed_part.insert(Selected{});
-        editor_data.floating = true;
+        editor_options.floating = true;
     }
 
 

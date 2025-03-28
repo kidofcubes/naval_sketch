@@ -264,6 +264,10 @@ impl Gizmo {
                 + delta * (DVec3::from(transform.translation) - self.config.translation))
                 .into(),
             TransformPivotPoint::IndividualOrigins => transform.translation,
+
+            TransformPivotPoint::Point(translation)=> (translation
+                + delta * (DVec3::from(transform.translation) - translation))
+                .into(),
         };
 
         let new_rotation = (delta * DQuat::from(transform.rotation)).normalize();

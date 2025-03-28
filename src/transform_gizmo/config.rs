@@ -8,6 +8,7 @@ use enumset::{enum_set, EnumSet, EnumSetType};
 use bevy::math::{
     DMat4, DQuat, DVec3, DVec4, Vec4Swizzles,
 };
+use mint::Vector3;
 
 use super::math::{screen_to_world, world_to_screen, Transform};
 
@@ -187,6 +188,9 @@ impl PreparedGizmoConfig {
         } else {
             translation /= target_count as f64;
             scale /= target_count as f64;
+        }
+        if let TransformPivotPoint::Point(point) = self.config.pivot_point {
+            translation = point;
         }
 
         self.update_transform(Transform {
@@ -399,13 +403,15 @@ pub enum GizmoModeKind {
 }
 
 /// The point in space around which all rotations are centered.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub enum TransformPivotPoint {
     /// Pivot around the median point of targets
     #[default]
     MedianPoint,
     /// Pivot around each target's own origin
     IndividualOrigins,
+    /// Pivot around a set origin
+    Point(DVec3),
 }
 
 /// Orientation of a gizmo.
