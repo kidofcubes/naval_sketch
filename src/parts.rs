@@ -2,7 +2,8 @@ use std::{fmt::Display, iter::once, ops::Deref, path::Path};
 use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, log::tracing_subscriber::filter::combinator::And, prelude::*, reflect::List, render::{mesh::Indices, view::RenderLayers}, utils::HashMap};
 use dirs::cache_dir;
 use enum_collections::{EnumMap, Enumerated};
-use crate::{asset_extractor::{get_builtin_parts, get_workshop_parts}, editor::Selected, editor_ui::{get_base_part_entity, Language}, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret, InitData};
+use serde::{de::Visitor, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
+use crate::{asset_extractor::{get_all_parts, get_builtin_parts, get_workshop_parts, LocalPaths}, editor::Selected, editor_ui::{get_base_part_entity, Language}, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret, InitData};
 use crate::parsing::{AdjustableHull, BasePart, Part};
 use core::f32;
 use std::{fs::create_dir_all, path::PathBuf};
@@ -13,13 +14,13 @@ pub struct PartRegistry {
     pub parts: HashMap<i32,PartData>
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiLangString {
-    pub texts: EnumMap<Language,Option<String>,{Language::SIZE}>,
+    pub texts: HashMap<Language,String>,
 }
 impl Default for MultiLangString {
     fn default() -> Self {
-        MultiLangString { texts: EnumMap::new_option() }
+        MultiLangString { texts: HashMap::new() }
     }
 }
 impl MultiLangString {
@@ -28,15 +29,15 @@ impl MultiLangString {
     }
 
     pub fn with(mut self, lang: Language, text: String) -> Self {
-        self.texts[lang] = Some(text);
+        self.texts.insert(lang,text);
         return self;
     }
     pub fn get(&self, lang: Language) -> &str {
-        return self.texts[lang].as_deref().unwrap_or(self.get_fallback());
+        return self.texts.get(&lang).map(String::as_str).unwrap_or(self.get_fallback());
     }
     pub fn get_fallback(&self) -> &str {
         for lang in Language::VARIANTS {
-            if let Some(text) = self.texts[*lang].as_ref() {
+            if let Some(text) = self.texts.get(lang).as_ref() {
                 return text;
             }
         }
@@ -44,7 +45,7 @@ impl MultiLangString {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PartData {
     pub id: i32,
     pub part_name: MultiLangString,
@@ -64,7 +65,7 @@ pub struct PartData {
     pub thumbnail: Option<PathBuf>
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct WeaponData {
 }
 
@@ -72,21 +73,25 @@ pub fn register_all_parts(
     init_data: Res<InitData>,
     mut part_registry: ResMut<PartRegistry>
 ){
-    let cache_folder = cache_dir().unwrap().join("naval_sketch");
-    let steam_folder = PathBuf::from(init_data.steam_path.clone());
-    let workshop_folder = steam_folder.join("steamapps").join("workshop").join("content").join("842780");
-    let game_folder = steam_folder.join("steamapps").join("common").join("NavalArt");
-    create_dir_all(&cache_folder).unwrap();
 
-    let workshop_parts = get_workshop_parts(&workshop_folder, &cache_folder);
-    for workshop_port in workshop_parts {
-        part_registry.parts.insert(workshop_port.id,workshop_port);
+
+
+    let result = futures::executor::block_on(get_all_parts(init_data.data_paths.as_ref()));
+    if let Ok(parts) = result {
+        for part in parts {
+            part_registry.parts.insert(part.id,part);
+        }
     }
 
-    let builtin_parts = get_builtin_parts(&game_folder, &cache_folder);
-    for builtin_part in builtin_parts {
-        part_registry.parts.insert(builtin_part.id,builtin_part);
-    }
+    // let workshop_parts = get_workshop_parts(&workshop_folder, &cache_folder);
+    // for workshop_port in workshop_parts {
+    //     part_registry.parts.insert(workshop_port.id,workshop_port);
+    // }
+    //
+    // let builtin_parts = get_builtin_parts(&game_folder, &cache_folder);
+    // for builtin_part in builtin_parts {
+    //     part_registry.parts.insert(builtin_part.id,builtin_part);
+    // }
 
     println!("all registered parts is {:?}",part_registry.parts.keys());
 
@@ -286,21 +291,23 @@ pub fn place_part<'a>(
     part_registry: &Res<PartRegistry>,
     entity: &mut EntityCommands,
     part: &Part
-) {
+) -> Result<(), Box<dyn std::error::Error>> {
+
+    let Some(part_data) = part_registry.parts.get(&part.base_part().id) else {
+        return Err("oh noooo!")?;
+    };
     // let mut entity: EntityCommands = commands.spawn((
     //     
     // ));
-    entity.insert((
-        base_part_to_bevy_transform(part.base_part()),
-        part.base_part().clone()
-    ));
-
-
+    entity.insert(base_part_to_bevy_transform(part.base_part()));
     match part {
         Part::Normal(base_part) => entity.insert(*base_part),
         Part::AdjustableHull(base_part, adjustable_hull) => entity.insert((*base_part, *adjustable_hull)),
         Part::Turret(base_part, turret) => entity.insert((*base_part, *turret)),
     };
+
+
+
 
     if let Part::AdjustableHull(base_part, adjustable_hull) = part {
         let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD);
@@ -317,7 +324,7 @@ pub fn place_part<'a>(
     }else{
         // println!("looking for part with id {:?}",&part.base_part().id);
         // println!("loaded parts are {:?}",part_registry.parts.keys());
-        let asset_path = AssetPath::from(part_registry.parts.get(&part.base_part().id).unwrap().model.clone());
+        let asset_path = AssetPath::from(part_data.model.clone());
         let mut handle = asset_server.get_handle(&asset_path);
         if handle.is_none() {
             handle = Some(asset_server.load(
@@ -341,6 +348,8 @@ pub fn place_part<'a>(
     }
 
 
+
+
     match part {
         Part::Normal(base_part) => {},
         Part::AdjustableHull(base_part, adjustable_hull) => {
@@ -348,6 +357,7 @@ pub fn place_part<'a>(
         },
         Part::Turret(base_part, turret) => {},
     }
+    return Ok(());
 }
 
 fn initalize_part_scene(trigger: Trigger<HierarchyEvent>, children: Query<&Children>){

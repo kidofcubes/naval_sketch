@@ -9,6 +9,7 @@ mod editor_actions;
 mod transform_gizmo_bevy;
 mod transform_gizmo;
 
+use asset_extractor::LocalPaths;
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::HashMap};
 use bevy_egui::EguiPlugin;
 use cam_movement::CameraMovementPlugin;
@@ -17,7 +18,7 @@ use parsing::{load_save, AdjustableHull, BasePart, Part};
 use parts::{on_part_meshes_init, place_part, register_all_parts, BasePartMesh, BasePartMeshes, PartRegistry};
 use transform_gizmo::GizmoVisuals;
 use transform_gizmo_bevy::{GizmoHotkeys, GizmoOptions, TransformGizmoPlugin};
-use std::{env, path::Path};
+use std::{env, path::{Path, PathBuf}};
 
 
 
@@ -149,8 +150,8 @@ fn temp_test_update(
 
 #[derive(Resource)]
 struct InitData {
-    file_path: String,
-    steam_path: String
+    file_path: Option<String>,
+    data_paths: Option<LocalPaths>
 }
 
 #[derive(Resource)]
@@ -176,71 +177,73 @@ fn setup(
 
     let path = init_data.file_path.clone();
 
-    let parts_result = load_save(Path::new(&path));
+    if let Some(path) = path {
+        let parts_result = load_save(Path::new(&path));
 
 
-    println!("PLACING PARTS");
-    if let Ok(parts) = parts_result {
-        for part in parts {
-            let mut entity = commands.spawn_empty();
+        println!("PLACING PARTS");
+        if let Ok(parts) = parts_result {
+            for part in parts {
+                let mut entity = commands.spawn_empty();
+                place_part(
+                    &mut meshes,
+                    &mut materials,
+                    &asset_server,
+                    &part_registry,
+                    &mut entity,
+                    &part);
+            }
+        }else{
+            println!("ERROR WAS {:?}",parts_result);
             place_part(
-                &mut meshes,
-                &mut materials,
-                &asset_server,
-                &part_registry,
-                &mut entity,
-                &part);
+                    &mut meshes,
+                    &mut materials,
+                    &asset_server,
+                    &part_registry,
+                    &mut commands.spawn_empty(),
+                    &Part::Normal(BasePart {
+                        id: 5,
+                        ignore_physics: false,
+                        position: Vec3 {x:10.0,y:10.0,z:10.0},
+                        rotation: Vec3::ZERO,
+                        scale: Vec3 {x:5.0,y:1.0,z:5.0},
+                        color: Color::WHITE,
+                        armor: 0,
+                    }));
+
+
+            place_part(
+                    &mut meshes,
+                    &mut materials,
+                    &asset_server,
+                    &part_registry,
+                    &mut commands.spawn_empty(),
+                    &Part::Normal(BasePart {
+                        id: 5,
+                        ignore_physics: false,
+                        position: Vec3 {x:20.0,y:10.0,z:10.0},
+                        rotation: Vec3::ZERO,
+                        scale: Vec3 {x:1.0,y:1.0,z:1.0},
+                        color: Color::srgb_u8(0, 255, 0),
+                        armor: 0,
+                    }));
+            
+
+            // commands.spawn((
+            //     Mesh3d(meshes.add(Cuboid::default())),
+            //     MeshMaterial3d(materials.add(Color::srgb_u8(0, 0, 255))),
+            //     Transform::from_translation(Vec3::new(0.0,30.0,0.0))
+            // ));
+            // commands.spawn((
+            //     Mesh3d(meshes.add(Cuboid::default())),
+            //     MeshMaterial3d(materials.add(Color::srgb_u8(255, 0, 0))),
+            //     Transform::from_translation(Vec3::new(0.0,30.0,1.0))
+            // ));
+
+
+            
+
         }
-    }else{
-        println!("ERROR WAS {:?}",parts_result);
-        place_part(
-                &mut meshes,
-                &mut materials,
-                &asset_server,
-                &part_registry,
-                &mut commands.spawn_empty(),
-                &Part::Normal(BasePart {
-                    id: 5,
-                    ignore_physics: false,
-                    position: Vec3 {x:10.0,y:10.0,z:10.0},
-                    rotation: Vec3::ZERO,
-                    scale: Vec3 {x:5.0,y:1.0,z:5.0},
-                    color: Color::WHITE,
-                    armor: 0,
-                }));
-
-
-        place_part(
-                &mut meshes,
-                &mut materials,
-                &asset_server,
-                &part_registry,
-                &mut commands.spawn_empty(),
-                &Part::Normal(BasePart {
-                    id: 5,
-                    ignore_physics: false,
-                    position: Vec3 {x:20.0,y:10.0,z:10.0},
-                    rotation: Vec3::ZERO,
-                    scale: Vec3 {x:1.0,y:1.0,z:1.0},
-                    color: Color::srgb_u8(0, 255, 0),
-                    armor: 0,
-                }));
-        
-
-        // commands.spawn((
-        //     Mesh3d(meshes.add(Cuboid::default())),
-        //     MeshMaterial3d(materials.add(Color::srgb_u8(0, 0, 255))),
-        //     Transform::from_translation(Vec3::new(0.0,30.0,0.0))
-        // ));
-        // commands.spawn((
-        //     Mesh3d(meshes.add(Cuboid::default())),
-        //     MeshMaterial3d(materials.add(Color::srgb_u8(255, 0, 0))),
-        //     Transform::from_translation(Vec3::new(0.0,30.0,1.0))
-        // ));
-
-
-        
-
     }
 
 
@@ -270,41 +273,43 @@ fn setup(
 //NOTE, SCALE IS THE FULL WIDTH
 
 fn main() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        console_log::init_with_level(log::Level::Debug);
+        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    }
+    
+
     let args: Vec<String> = env::args().collect();
 
-    let steam_path = &args[1];
-    let file_path = &args[2];
+    let mut data_paths: Option<LocalPaths> = None;
+    let mut file_path: Option<String> = None;
 
-    if file_path == "test" {
-        
-
-        App::new()
-            .insert_resource(InitData {
-                file_path: file_path.to_string(),
-                steam_path: steam_path.to_string()
-            })
-            .insert_resource(PartRegistry {parts: HashMap::new()})
-            .add_plugins((
-                    DefaultPlugins.build(),
-                    CameraMovementPlugin,
-                    MeshPickingPlugin,
-                    EditorPlugin,
-                    //OutlinePlugin,
-                    ))
-            .add_systems(Startup, (register_all_parts.before(setup),setup))
-            .add_systems(Update, (temp_test_update, on_part_meshes_init))
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let steam_path = &args[1];
+        file_path = Some(args[2].clone());
 
 
-            .run();
+        let cache_folder = dirs::cache_dir().unwrap().join("naval_sketch");
+        let steam_folder = PathBuf::from(steam_path.clone());
+        let workshop_folder = steam_folder.join("steamapps").join("workshop").join("content").join("842780");
+        let game_folder = steam_folder.join("steamapps").join("common").join("NavalArt");
+        std::fs::create_dir_all(&cache_folder).unwrap();
 
-        return;
+
+        data_paths = Some(LocalPaths {
+                    cache_folder,
+                    game_folder,
+                    workshop_folder
+                });
     }
 
 
     App::new()
         .insert_resource(InitData {
-            file_path: file_path.to_string(),
-            steam_path: steam_path.to_string()
+            file_path,
+            data_paths
         })
         .insert_resource(PartRegistry {parts: HashMap::new()})
         .insert_resource(WireframeConfig {
@@ -332,7 +337,7 @@ fn main() {
                 DefaultPlugins.set(RenderPlugin {
                     render_creation: RenderCreation::Automatic(WgpuSettings {
                         // WARN this is a native only feature. It will not work with webgl or webgpu
-                        features: WgpuFeatures::POLYGON_MODE_LINE,
+                        // features: WgpuFeatures::POLYGON_MODE_LINE,
                         ..default()
                     }),
                     ..default()

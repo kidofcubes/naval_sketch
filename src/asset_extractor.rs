@@ -2,6 +2,7 @@ use std::{error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, File, R
 
 use bevy::{math::Vec3, reflect::List, utils::HashMap};
 use csv::StringRecord;
+use gloo_net::http::Request;
 use quick_xml::Reader;
 
 use regex::Regex;
@@ -10,7 +11,55 @@ use yaml_rust2::Yaml;
 use crate::{editor_ui::Language, parsing::get_attribute_string, parts::{MultiLangString, PartData, WeaponData}};
 
 
+pub struct LocalPaths {
+    pub cache_folder: PathBuf,
+    pub game_folder: PathBuf,
+    pub workshop_folder: PathBuf,
+}
+
+
+
+pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartData>, Box<dyn std::error::Error>> {
+    if let Some(local_paths) = local_paths {
+        let parts_path = local_paths.cache_folder.join("parts.json"); 
+        if Path::exists(&parts_path) {
+            let string = fs::read_to_string(parts_path).unwrap();
+            let parts: Vec<PartData> = serde_json::from_str(&string).unwrap();
+            return Ok(parts);
+        }
+
+        let mut parts: Vec<PartData> = Vec::new();
+        parts.append(&mut get_builtin_parts(&local_paths.game_folder, &local_paths.cache_folder));
+        parts.append(&mut get_workshop_parts(&local_paths.workshop_folder, &local_paths.cache_folder));
+        return Ok(parts);
+    }else{
+        // let resp = reqwest::blocking::get("https:///ip").unwrap().text().unwrap();
+        // println!("thing is {:?}",resp);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            return Ok(Vec::new());
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let resp = Request::get("https://httpbin.org/ip")
+                .send()
+                .await
+                .unwrap();
+            println!("THING IS {:?}",resp.body());
+            return Ok(Vec::new());
+
+        }
+    };
+}
+
 pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartData> {
+    
+
+
+
+
     let mut parts: Vec<PartData> = Vec::new();
     let unity_project_dir = cache_folder.join("naval_art").join("unity_project_extracted");
     let primary_content_dir = cache_folder.join("naval_art").join("primary_content_extracted");
@@ -90,6 +139,12 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
 
         parts.push(part_data);
     }
+
+
+    let j = serde_json::to_string(&parts).unwrap();
+    
+
+
 
     return parts;
 }
@@ -567,40 +622,40 @@ fn load_mod_config_file(file_path: &Path) -> Result<ModConfig,Box<dyn Error>> {
 
 fn load_folder(path: &Path){
     let params = [("path", path)];
-    generate_request("/LoadFolder")
-        .form(&params)
-        .send().unwrap();
+    // generate_request("/LoadFolder")
+    //     .form(&params)
+    //     .send().unwrap();
 }
 
 fn load_file(path: &Path){
     let params = [("path", path)];
-    generate_request("/LoadFile")
-        .form(&params)
-        .send().unwrap();
+    // generate_request("/LoadFile")
+    //     .form(&params)
+    //     .send().unwrap();
 }
 
 fn extract_unity_project_to(path: &Path){
     let params = [("path", path)];
-    generate_request("/Export/UnityProject")
-        .form(&params)
-        .send().unwrap();
+    // generate_request("/Export/UnityProject")
+    //     .form(&params)
+    //     .send().unwrap();
 }
 
 fn extract_primary_content_to(path: &Path){
     let params = [("path", path)];
-    generate_request("/Export/PrimaryContent")
-        .form(&params)
-        .send().unwrap();
+    // generate_request("/Export/PrimaryContent")
+    //     .form(&params)
+    //     .send().unwrap();
 }
 
-fn generate_request(path: &str) -> reqwest::blocking::RequestBuilder{
-    let client = reqwest::blocking::Client::new();
-    let mut url = "http://127.0.0.1:8001".to_owned();
-    url.push_str(path);
-    return client.post(&url)
-        //.body("the exact body that is sent")
-        .timeout(Duration::from_secs(60*60))
-        // .form(params)
-        // .send();
-
-}
+// fn generate_request(path: &str) -> reqwest::blocking::RequestBuilder{
+//     let client = reqwest::blocking::Client::new();
+//     let mut url = "http://127.0.0.1:8001".to_owned();
+//     url.push_str(path);
+//     return client.post(&url)
+//         //.body("the exact body that is sent")
+//         .timeout(Duration::from_secs(60*60))
+//         // .form(params)
+//         // .send();
+//
+// }
