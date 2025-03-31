@@ -95,6 +95,7 @@ pub struct TestData {
     pub part_thumbnails: HashMap<i32,Handle<Image>>
 
 }
+
 fn setup_ui(
     mut contexts: EguiContexts,
     mut asset_server: ResMut<AssetServer>,
@@ -116,8 +117,13 @@ fn setup_ui(
     for part in &part_registry.parts {
         let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("no_texture.png").to_owned());
         // println!("ADDING PAT {:?}",part.0);
-        images.part_thumbnails.insert(*part.0,asset_server.load(thumbnail_path));
-    //             ui.image(thumbnail_path);
+        let asset_path = AssetPath::from(part.1.thumbnail_asset_path(part_registry.path_prefix.as_deref()).unwrap_or(
+            "no_texture.png".to_string()
+        ));
+        // let asset_path = AssetPath::from("no_texture.png");
+        // images.part_thumbnails.insert(*part.0,asset_server.load(thumbnail_path));
+        images.part_thumbnails.insert(*part.0,asset_server.load(asset_path));
+                // ui.image(thumbnail_path);
     }
 
 

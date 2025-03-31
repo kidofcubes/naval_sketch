@@ -1,6 +1,6 @@
 use std::{error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, File, ReadDir}, path::{Path, PathBuf}, time::Duration};
 
-use bevy::{log::{self, debug, info}, math::Vec3, reflect::List, utils::HashMap};
+use bevy::{log::{self, debug, info}, math::Vec3, reflect::List, render::RenderPlugin, utils::HashMap};
 use csv::StringRecord;
 use quick_xml::Reader;
 
@@ -10,6 +10,7 @@ use yaml_rust2::Yaml;
 use crate::{editor_ui::Language, parsing::get_attribute_string, parts::{MultiLangString, PartData, WeaponData}};
 
 
+#[derive(Clone, Debug)]
 pub struct LocalPaths {
     pub cache_folder: PathBuf,
     pub game_folder: PathBuf,
@@ -23,26 +24,24 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
     if let Some(local_paths) = local_paths {
         let parts_path = local_paths.cache_folder.join("parts.json"); 
         if Path::exists(&parts_path) {
-            let string = fs::read_to_string(parts_path).unwrap();
-            let parts: Vec<PartData> = serde_json::from_str(&string).unwrap();
+            let string = fs::read_to_string(parts_path)?;
+            let parts: Vec<PartData> = serde_json::from_str(&string)?;
             return Ok(parts);
         }
+        info!("THE CACHE IS {:?}",local_paths.cache_folder);
 
         let mut parts: Vec<PartData> = Vec::new();
         parts.append(&mut get_builtin_parts(&local_paths.game_folder, &local_paths.cache_folder));
         parts.append(&mut get_workshop_parts(&local_paths.workshop_folder, &local_paths.cache_folder));
 
         let json = serde_json::to_string(&parts).unwrap();
-        fs::write(parts_path,json);
+        fs::write(parts_path,json)?;
 
         return Ok(parts);
     }else{
-        // let resp = reqwest::blocking::get("https:///ip").unwrap().text().unwrap();
-        // println!("thing is {:?}",resp);
-
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return Ok(Vec::new());
+            return Err("no part paths")?;
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -59,10 +58,6 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
             let parts: Vec<PartData> = serde_json::from_str(&text).unwrap();
             info!("PARTS LENGTH IS {:?}",parts.len());
             return Ok(parts);
-
-            // info!("AND ITS {:?}",resp.text().await.unwrap());
-            // return Ok(Vec::new())/* ; */
-
         }
     };
 }
@@ -126,7 +121,7 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
 
 
         
-        let model_path = models_dir.join(prefab_path.path().file_stem().unwrap().to_str().unwrap().to_owned()+".glb");
+        let mut model_path = models_dir.join(prefab_path.path().file_stem().unwrap().to_str().unwrap().to_owned()+".glb");
         if !model_path.exists() {
             println!("model path {:?} doesn't exist",model_path);
             continue;
@@ -135,11 +130,11 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
         let thumbnail_path = thumbnails_dir.join(prefab_path.path().file_stem().unwrap().to_str().unwrap().to_owned()+".png");
         let mut thumbnail_path_option: Option<PathBuf> = None;
         if thumbnail_path.exists() {
-            thumbnail_path_option = Some(thumbnail_path);
+            thumbnail_path_option = Some(thumbnail_path.strip_prefix(cache_folder).unwrap().to_path_buf());
         }
 
         let prefab = parse_prefab(&prefab_path.path());
-        let mut part_data = load_prefab(&prefab, model_path, thumbnail_path_option, false);
+        let mut part_data = load_prefab(&prefab, model_path.strip_prefix(cache_folder).unwrap().to_path_buf(), thumbnail_path_option, false);
         if let Some(part_namez) = part_names.get(&part_data.id) {
             if let Some(name) = part_namez.get(1) { part_data.part_name = part_data.part_name.with(Language::CN, name.to_owned()); }
             if let Some(name) = part_namez.get(2) { part_data.part_name = part_data.part_name.with(Language::EN, name.to_owned()); }
@@ -366,11 +361,11 @@ pub fn get_workshop_parts(workshop_folder: &Path, cache_folder: &Path) -> Vec<Pa
             let thumbnail_path = thumbnails_dir.join(format!("p{}.png",prefab_path.file_stem().unwrap().to_str().unwrap().to_owned()));
             let mut thumbnail_path_option: Option<PathBuf> = None;
             if thumbnail_path.exists() {
-                thumbnail_path_option = Some(thumbnail_path);
+                thumbnail_path_option = Some(thumbnail_path.strip_prefix(cache_folder).unwrap().to_path_buf());
             }
 
             if model_path.exists() {
-                parts.push(load_prefab(&prefab, model_path, thumbnail_path_option, true));
+                parts.push(load_prefab(&prefab, model_path.strip_prefix(cache_folder).unwrap().to_path_buf(), thumbnail_path_option, true));
             }
         }
     }

@@ -12,6 +12,7 @@ mod transform_gizmo;
 use asset_extractor::{get_all_parts, LocalPaths};
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::{futures, HashMap}};
 use bevy_egui::EguiPlugin;
+use bevy_web_asset::WebAssetPlugin;
 use cam_movement::CameraMovementPlugin;
 use editor::{EditorPlugin};
 use parsing::{load_save, AdjustableHull, BasePart, Part};
@@ -270,24 +271,6 @@ fn setup(
 
 
 }
-// #[cfg(target_arch = "wasm32")]
-// #[wasm_bindgen::prelude::wasm_bindgen(start)]
-// pub async fn main_js() {
-//     // get_all_parts(None).await;
-//     println!("wtf");
-//     #[cfg(target_arch = "wasm32")]
-//     {
-//         console_log::init_with_level(log::Level::Error);
-//         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-//         info!("THING ALKSDHFKAJ");
-//         // futures::executor::block_on(get_all_parts(None));
-//         info!("THING ALKSDHFKAJ 2");
-//         // .await;
-//     }
-//     async {
-//         start_game(None, None, PartRegistry { parts: HashMap::new() });
-//     }.await;
-// }
 
 //NOTE, SCALE IS THE FULL WIDTH
 
@@ -327,19 +310,12 @@ fn main() {
                     workshop_folder
                 });
     }
-    start_game(data_paths, file_path, PartRegistry { parts: HashMap::new() });
-
-
-}
-fn start_game(data_paths: Option<LocalPaths>, file_path: Option<String>, part_registry: PartRegistry) {
 
     App::new()
         .insert_resource(InitData {
             file_path,
             data_paths
         })
-        // .insert_resource(PartRegistry {parts: HashMap::new()})
-        .insert_resource(part_registry)
         .insert_resource(WireframeConfig {
             // The global wireframe config enables drawing of wireframes on every mesh,
             // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
@@ -362,6 +338,7 @@ fn start_game(data_paths: Option<LocalPaths>, file_path: Option<String>, part_re
         })
 
         .add_plugins((
+                WebAssetPlugin::default(),
                 DefaultPlugins.set(RenderPlugin {
                     render_creation: RenderCreation::Automatic(WgpuSettings {
                         // WARN this is a native only feature. It will not work with webgl or webgpu

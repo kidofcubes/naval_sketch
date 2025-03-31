@@ -4801,7 +4801,7 @@ dependencies = [
  "enum_dispatch",
  "enumset",
  "epaint",
- "futures",
+ "futures-lite 2.6.0",
  "getrandom 0.3.2",
  "glam",
  "gloo-net",
@@ -4818,6 +4818,7 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-sys",
  "yaml-rust2",
 ]
 

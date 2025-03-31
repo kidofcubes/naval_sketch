@@ -11,7 +11,8 @@ use std::{fs::create_dir_all, path::PathBuf};
 
 #[derive(Resource)]
 pub struct PartRegistry {
-    pub parts: HashMap<i32,PartData>
+    pub parts: HashMap<i32,PartData>,
+    pub path_prefix: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +64,34 @@ pub struct PartData {
     pub weapon: Option<WeaponData>,
     pub model: PathBuf,
     pub thumbnail: Option<PathBuf>
+}
+impl PartData {
+    pub fn model_asset_path(&self, prefix: Option<&Path>) -> String {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let root = web_sys::window().unwrap().location().origin().unwrap();
+            return root.to_owned()+"/"+self.model.to_str().unwrap();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            return prefix.unwrap().join(self.model.clone());
+        }
+    }
+    pub fn thumbnail_asset_path(&self, prefix: Option<&Path>) -> Option<String> {
+        if self.thumbnail.is_none() {
+            return None;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let root = web_sys::window().unwrap().location().origin().unwrap();
+            return Some(root.to_owned()+"/"+self.thumbnail.as_ref().unwrap().to_str().unwrap());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            return Some(prefix.unwrap().join(self.thumbnail.clone().unwrap()));
+        }
+    }
+
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -122,7 +151,7 @@ pub fn register_all_parts(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let result = futures::executor::block_on(get_all_parts(init_data.data_paths.as_ref()));
+        let result = futures_lite::future::block_on(get_all_parts(init_data.data_paths.as_ref()));
         if let Ok(parts) = result {
             for part in parts {
                 part_registry.parts.insert(part.id,part);
@@ -374,7 +403,8 @@ pub fn place_part<'a>(
     }else{
         // println!("looking for part with id {:?}",&part.base_part().id);
         // println!("loaded parts are {:?}",part_registry.parts.keys());
-        let asset_path = AssetPath::from(part_data.model.clone());
+        //let asset_path = AssetPath::from(part_data.model_asset_path(part_registry.path_prefix.as_deref())); 
+        let asset_path = AssetPath::from(part_data.model_asset_path(part_registry.path_prefix.as_deref())); 
         let mut handle = asset_server.get_handle(&asset_path);
         if handle.is_none() {
             handle = Some(asset_server.load(
