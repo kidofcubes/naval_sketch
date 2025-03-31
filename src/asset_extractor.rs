@@ -1,8 +1,7 @@
 use std::{error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, File, ReadDir}, path::{Path, PathBuf}, time::Duration};
 
-use bevy::{math::Vec3, reflect::List, utils::HashMap};
+use bevy::{log::{self, debug, info}, math::Vec3, reflect::List, utils::HashMap};
 use csv::StringRecord;
-use gloo_net::http::Request;
 use quick_xml::Reader;
 
 use regex::Regex;
@@ -20,6 +19,7 @@ pub struct LocalPaths {
 
 
 pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartData>, Box<dyn std::error::Error>> {
+    info!("STARTD GETTING ALL PARTS");
     if let Some(local_paths) = local_paths {
         let parts_path = local_paths.cache_folder.join("parts.json"); 
         if Path::exists(&parts_path) {
@@ -31,6 +31,10 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
         let mut parts: Vec<PartData> = Vec::new();
         parts.append(&mut get_builtin_parts(&local_paths.game_folder, &local_paths.cache_folder));
         parts.append(&mut get_workshop_parts(&local_paths.workshop_folder, &local_paths.cache_folder));
+
+        let json = serde_json::to_string(&parts).unwrap();
+        fs::write(parts_path,json);
+
         return Ok(parts);
     }else{
         // let resp = reqwest::blocking::get("https:///ip").unwrap().text().unwrap();
@@ -43,12 +47,21 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
 
         #[cfg(target_arch = "wasm32")]
         {
-            let resp = Request::get("https://httpbin.org/ip")
+            info!("OKALSDFKJLASFDKJASFKLJASHFKJLSKLJFASLKJHFLSKJAFKLJAHSFLKJHSAFLHKJSAFKLJHKJLFAKJLFJKHSALFKJLASFKLJSAKL");
+            let resp = gloo_net::http::Request::get("http://127.0.0.1:8080/parts.json")
                 .send()
                 .await
                 .unwrap();
-            println!("THING IS {:?}",resp.body());
-            return Ok(Vec::new());
+            info!("THING IS {:?}",resp.status());
+            info!("ITS {:?}",resp.status());
+            let text = resp.text().await.unwrap();
+            info!("TEXT IS {:?}",text);
+            let parts: Vec<PartData> = serde_json::from_str(&text).unwrap();
+            info!("PARTS LENGTH IS {:?}",parts.len());
+            return Ok(parts);
+
+            // info!("AND ITS {:?}",resp.text().await.unwrap());
+            // return Ok(Vec::new())/* ; */
 
         }
     };
@@ -140,9 +153,6 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
         parts.push(part_data);
     }
 
-
-    let j = serde_json::to_string(&parts).unwrap();
-    
 
 
 

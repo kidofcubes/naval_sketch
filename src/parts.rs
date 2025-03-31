@@ -1,5 +1,5 @@
 use std::{fmt::Display, iter::once, ops::Deref, path::Path};
-use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, log::tracing_subscriber::filter::combinator::And, prelude::*, reflect::List, render::{mesh::Indices, view::RenderLayers}, utils::HashMap};
+use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, log::tracing_subscriber::filter::combinator::And, prelude::*, reflect::List, render::{mesh::Indices, view::RenderLayers}, tasks::ComputeTaskPool, utils::HashMap};
 use dirs::cache_dir;
 use enum_collections::{EnumMap, Enumerated};
 use serde::{de::Visitor, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
@@ -75,14 +75,64 @@ pub fn register_all_parts(
 ){
 
 
+    // get_all_parts(None);
+    // info!("DONE DOING THE THING 1");
+    // let result = futures::executor::block_on(get_all_parts(init_data.data_paths.as_ref()));
 
-    let result = futures::executor::block_on(get_all_parts(init_data.data_paths.as_ref()));
-    if let Ok(parts) = result {
-        for part in parts {
-            part_registry.parts.insert(part.id,part);
-        }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // can't get the value out, or pass my resource in (also doesn't seem to block)
+        // wasm_bindgen_futures::spawn_local(async {
+        //     let result = get_all_parts(None).await;
+        //     info!("DONE DOING THE THING 3 ");
+        // });
+        
+        // fails with a panic
+        // ComputeTaskPool::get().scope(|s| {
+        //     s.spawn(async {
+        //         let result = get_all_parts(None).await;
+        //         info!("DONE DOING THE THING 3 ");
+        //     });
+        // });
+
+        // hangs forever
+        // futures::executor::block_on(async{
+        //         let result = get_all_parts(None).await;
+        //         info!("DONE DOING THE THING 4 ");
+        // });
+
+        // let result = pollster::FutureExt::block_on(get_all_parts(None));
+        // info!("DONE DOING THE THING 3 ");
+        
+        
+        // bevy::tasks::block_on(async {
+        //         let result = get_all_parts(None).await;
+        //         info!("DONE DOING THE THING 3 ");
+        //         if let Ok(parts) = result {
+        //             for part in parts {
+        //                 part_registry.parts.insert(part.id,part);
+        //             }
+        //         }
+        //         info!("DONE DOING THE THING 4 ");
+        //
+        //
+        // });
+        info!("DONE DOING THE THING 5 ");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let result = futures::executor::block_on(get_all_parts(init_data.data_paths.as_ref()));
+        if let Ok(parts) = result {
+            for part in parts {
+                part_registry.parts.insert(part.id,part);
+            }
+        }
+
+    }
+    // info!("DONE DOING THE THING 2 {:?}",result.unwrap().len());
+    
+    
     // let workshop_parts = get_workshop_parts(&workshop_folder, &cache_folder);
     // for workshop_port in workshop_parts {
     //     part_registry.parts.insert(workshop_port.id,workshop_port);

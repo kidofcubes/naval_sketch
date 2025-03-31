@@ -1,12 +1,12 @@
 use core::f32;
-use std::collections::VecDeque;
+use std::{collections::VecDeque, sync::Arc};
 
 use bevy_egui::EguiContexts;
 use enum_collections::{EnumMap, Enumerated};
 use regex::Regex;
 
-use crate::{cam_movement::EditorCamera, editor_actions::{EditorActionEvent, EditorSettingChange}, editor_ui::{render_gizmos, update_command_text, update_display_text, update_selected, EditorUiPlugin, Language, PropertiesDisplayData}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, BasePartMesh, BasePartMeshes, PartRegistry}, transform_gizmo::{config::TransformPivotPoint, GizmoOrientation}, transform_gizmo_bevy::{GizmoOptions, GizmoTarget}};
-use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::{EventCursor, EventReader, Events}, query::Or, schedule::IntoSystemConfigs, system::{Local, SystemState}, world::{OnAdd, OnRemove, World}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{keyboard::{Key, KeyboardInput}, mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Dir3, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, mesh_picking::ray_cast::{MeshRayCast, RayCastSettings}, pointer::{PointerInteraction, PointerPress}, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, transform::components::GlobalTransform, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}, window::Window};
+use crate::{asset_extractor::get_all_parts, cam_movement::EditorCamera, editor_actions::{EditorActionEvent, EditorSettingChange}, editor_ui::{render_gizmos, update_command_text, update_display_text, update_selected, EditorUiPlugin, Language, PropertiesDisplayData}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, BasePartMesh, BasePartMeshes, PartData, PartRegistry}, transform_gizmo::{config::TransformPivotPoint, GizmoOrientation}, transform_gizmo_bevy::{GizmoOptions, GizmoTarget}};
+use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::{EventCursor, EventReader, Events}, query::Or, schedule::IntoSystemConfigs, system::{Local, SystemState}, world::{OnAdd, OnRemove, World}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{keyboard::{Key, KeyboardInput}, mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, log::info, math::{bounding::BoundingVolume, primitives::Cuboid, Dir3, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, mesh_picking::ray_cast::{MeshRayCast, RayCastSettings}, pointer::{PointerInteraction, PointerPress}, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers, RenderPlugin}, scene::{SceneInstance, SceneRoot}, tasks::{futures_lite::future, Task}, text::{TextColor, TextFont, TextLayout}, transform::components::GlobalTransform, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}, window::Window};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 
 
@@ -139,10 +139,62 @@ impl Plugin for EditorPlugin {
                 debug_gizmos
         ));
         app.add_observer(on_click);
+        // app.insert_resource(TestResource(bevy::tasks::IoTaskPool::get().spawn(async {
+        //     return get_all_parts(None).await.unwrap();
+        // })));
+        let the_thing = Arc::new(std::sync::Mutex::new(None));
+        app.insert_resource(TestResource(the_thing.clone()));
 
+        #[cfg(target_arch = "wasm32")]
+        bevy::tasks::IoTaskPool::get()
+            .spawn_local(async move {
+                let stuff = get_all_parts(None).await.unwrap();
+                let mut thingy = the_thing.lock().unwrap();
+                *thingy = Some(stuff);
+            })
+            .detach();
+        // Otherwise, just block for it to complete
+        // #[cfg(not(target_arch = "wasm32"))]
+        // futures_lite::future::block_on(async_renderer);
+
+        // RenderPlugin
+    }
+
+    fn ready(&self, app: &bevy::prelude::App) -> bool {
+
+        app.world()
+            .get_resource::<TestResource>()
+            .and_then(|frr| frr.0.try_lock().map(|locked| locked.is_some()).ok())
+            .unwrap_or(true)
+        //return app.world().resource::<TestResource>().0.is_finished();
+        // bevy::tasks::block_on(future::poll_once())
+        //return app.world().resource::<TestResource>().0.is_finished();
+    }
+    fn cleanup(&self, app: &mut bevy::app::App) {
+        let thing = app.world_mut().remove_resource::<TestResource>().unwrap();
+        // let result = futures::executor::block_on(thing.unwrap().0);
+        let result = thing.0.lock().unwrap().take().unwrap();
+        let mut part_registry = app.world_mut().resource_mut::<PartRegistry>();
+        info!("THING WORKSINASKJDA");
+
+        for part in result {
+            info!("ADDED PART {:?}",part);
+            part_registry.parts.insert(part.id,part);
+        }
 
     }
 }
+
+#[derive(Resource)]
+//pub struct TestResource(bevy::tasks::Task<Vec<PartData>>);
+// pub struct TestResource(bevy::tasks::Task<Vec<PartData>>);
+struct TestResource(
+    Arc<
+        std::sync::Mutex<
+            Option<Vec<PartData>>,
+        >,
+    >,
+);
 
 #[derive(Enumerated, Copy, Clone, Debug, PartialEq)]
 pub enum CommandMode {
