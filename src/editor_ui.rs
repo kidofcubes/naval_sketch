@@ -115,14 +115,11 @@ fn setup_ui(
     contexts.ctx_mut().set_fonts(fonts);
 
     for part in &part_registry.parts {
-        let thumbnail_path = part.1.thumbnail.clone().unwrap_or(Path::new("no_texture.png").to_owned());
+        let thumbnail_path = part.1.thumbnail.clone().unwrap_or("no_texture.png".to_string());
         // println!("ADDING PAT {:?}",part.0);
-        let asset_path = AssetPath::from(part.1.thumbnail_asset_path(part_registry.path_prefix.as_deref()).unwrap_or(
-            "no_texture.png".to_string()
-        ));
         // let asset_path = AssetPath::from("no_texture.png");
         // images.part_thumbnails.insert(*part.0,asset_server.load(thumbnail_path));
-        images.part_thumbnails.insert(*part.0,asset_server.load(asset_path));
+        images.part_thumbnails.insert(*part.0,asset_server.load(thumbnail_path));
                 // ui.image(thumbnail_path);
     }
 

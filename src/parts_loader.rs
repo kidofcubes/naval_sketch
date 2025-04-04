@@ -1,13 +1,14 @@
-use std::{error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, File, ReadDir}, path::{Path, PathBuf}, time::Duration};
+use std::{error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, File, ReadDir}, path::{Path, PathBuf}, sync::Arc, time::Duration};
 
-use bevy::{log::{self, debug, info}, math::Vec3, reflect::List, render::RenderPlugin, utils::HashMap};
+use bevy::{app::Plugin, asset::AssetPath, ecs::system::Resource, log::{self, debug, info}, math::Vec3, reflect::List, render::RenderPlugin, utils::HashMap};
 use csv::StringRecord;
 use quick_xml::Reader;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use yaml_rust2::Yaml;
 
-use crate::{editor_ui::Language, parsing::get_attribute_string, parts::{MultiLangString, PartData, WeaponData}};
+use crate::{editor_ui::Language, parsing::get_attribute_string, parts::{MultiLangString, PartRegistry, WeaponData}, InitData};
 
 
 #[derive(Clone, Debug)]
@@ -16,6 +17,116 @@ pub struct LocalPaths {
     pub game_folder: PathBuf,
     pub workshop_folder: PathBuf,
 }
+
+#[derive(Resource)]
+struct InitDataHolder(
+    Arc<
+        std::sync::Mutex<
+            Option<Vec<PartData>>,
+        >,
+    >,
+);
+
+pub struct PartLoaderPlugin;
+
+impl Plugin for PartLoaderPlugin{
+    fn build(&self, app: &mut bevy::prelude::App) {
+        let data_paths = app.world().resource::<InitData>().data_paths.clone();
+        // structure taken from RenderPlugin
+        let the_thing = Arc::new(std::sync::Mutex::new(None));
+        app.insert_resource(InitDataHolder(the_thing.clone()));
+        
+        let part_retriever = async move {
+                let stuff = get_all_parts(data_paths.as_ref()).await.unwrap();
+                let mut thingy = the_thing.lock().unwrap();
+                *thingy = Some(stuff);
+            };
+
+
+
+        #[cfg(target_arch = "wasm32")]
+        bevy::tasks::IoTaskPool::get()
+            .spawn_local(part_retriever)
+            .detach();
+        // Otherwise, just block for it to complete
+        #[cfg(not(target_arch = "wasm32"))]
+        futures_lite::future::block_on(part_retriever);
+
+    }
+
+    fn ready(&self, app: &bevy::prelude::App) -> bool {
+
+        app.world()
+            .get_resource::<InitDataHolder>()
+            .and_then(|frr| frr.0.try_lock().map(|locked| locked.is_some()).ok())
+            .unwrap_or(true)
+    }
+    fn cleanup(&self, app: &mut bevy::app::App) {
+        let thing = app.world_mut().remove_resource::<InitDataHolder>().unwrap();
+        let result = thing.0.lock().unwrap().take().unwrap();
+
+
+        // #[cfg(target_arch = "wasm32")]
+        // //let mut part_registry = PartRegistry { path_prefix: Some(std::path::PathBuf::new()), parts: HashMap::new() };
+        // let mut part_registry = PartRegistry { path_prefix: None, parts: HashMap::new() };
+        // #[cfg(not(target_arch = "wasm32"))]
+        // let mut part_registry = PartRegistry { path_prefix: Some(app.world().resource::<InitData>().data_paths.as_ref().unwrap().cache_folder.clone()), parts: HashMap::new() };
+        let mut part_registry = PartRegistry { parts: HashMap::new() };
+
+        for part in result {
+            part_registry.parts.insert(part.id,part);
+        }
+        app.world_mut().insert_resource(part_registry);
+
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartData {
+    pub id: i32,
+    pub part_name: MultiLangString,
+    pub part_description: MultiLangString,
+    pub builder_class: i32, //-1 is not found/invalid
+    pub weapon_type: i32, //-1 is not found/invalid
+    pub nation: u32,
+    pub armor: i32,
+    pub density: f32,
+    pub price: i32,
+    pub volume: f32,
+    pub center: Vec3,
+    //collier is half lengths
+    pub collider: Vec3,
+    pub weapon: Option<WeaponData>,
+    pub model: String,
+    pub thumbnail: Option<String>
+}
+
+// impl PartData {
+    // pub fn model_asset_path(&self, prefix: Option<&Path>) -> String {
+    //     #[cfg(target_arch = "wasm32")]
+    //     {
+    //         let root = web_sys::window().unwrap().location().origin().unwrap();
+    //         return root.to_owned()+"/"+self.model.to_str().unwrap();
+    //     }
+    //     #[cfg(not(target_arch = "wasm32"))]
+    //     {
+    //         return prefix.unwrap().join(self.model.clone());
+    //     }
+    // }
+    // pub fn thumbnail_asset_path(&self, prefix: Option<&Path>) -> Option<String> {
+    //     if self.thumbnail.is_none() {
+    //         return None;
+    //     }
+    //     #[cfg(target_arch = "wasm32")]
+    //     {
+    //         return Some(root.to_owned()+"/"+self.thumbnail.as_ref().unwrap().to_str().unwrap());
+    //     }
+    //     #[cfg(not(target_arch = "wasm32"))]
+    //     {
+    //         return Some(prefix.unwrap().join(self.thumbnail.clone().unwrap()));
+    //     }
+    // }
+// }
 
 
 
@@ -37,6 +148,13 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
         let json = serde_json::to_string(&parts).unwrap();
         fs::write(parts_path,json)?;
 
+        for part in parts.iter_mut() {
+            part.model = (local_paths.cache_folder.join(PathBuf::from(part.model.clone()))).into_os_string().into_string().unwrap();
+            if part.thumbnail.is_some() {
+                part.thumbnail = Some((local_paths.cache_folder.join(PathBuf::from(part.thumbnail.clone().unwrap()))).into_os_string().into_string().unwrap());
+            }
+        }
+
         return Ok(parts);
     }else{
         #[cfg(not(target_arch = "wasm32"))]
@@ -47,7 +165,15 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
         #[cfg(target_arch = "wasm32")]
         {
             info!("OKALSDFKJLASFDKJASFKLJASHFKJLSKLJFASLKJHFLSKJAFKLJAHSFLKJHSAFLHKJSAFKLJHKJLFAKJLFJKHSALFKJLASFKLJSAKL");
-            let resp = gloo_net::http::Request::get("http://127.0.0.1:8080/parts.json")
+            
+            let mut temp = web_sys::window().unwrap().location().pathname().unwrap().split_inclusive('/').map(|x| x.to_string()).collect::<Vec<String>>();
+            if temp.len()>1 {
+                temp.pop();
+            }
+            let prefix = (web_sys::window().unwrap().location().origin().unwrap()+&temp.join(""))+"assets/";
+            info!("PREFIX IS {:?}",prefix);
+
+            let resp = gloo_net::http::Request::get(&(prefix.clone()+"parts.json"))
                 .send()
                 .await
                 .unwrap();
@@ -55,8 +181,16 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
             info!("ITS {:?}",resp.status());
             let text = resp.text().await.unwrap();
             info!("TEXT IS {:?}",text);
-            let parts: Vec<PartData> = serde_json::from_str(&text).unwrap();
+            let mut parts: Vec<PartData> = serde_json::from_str(&text).unwrap();
             info!("PARTS LENGTH IS {:?}",parts.len());
+
+            for part in parts.iter_mut() {
+                part.model = prefix.clone()+&part.model;
+                if part.thumbnail.is_some() {
+                    part.thumbnail = Some(prefix.clone()+part.thumbnail.as_ref().unwrap());
+                }
+            }
+
             return Ok(parts);
         }
     };
@@ -247,8 +381,8 @@ fn load_prefab(prefab: &GameObject, model_path: PathBuf, thumbnail_path: Option<
         nation: part_mono_behaviour.get("nation").unwrap().as_i64().unwrap() as u32,
         volume: get_as_f32(part_mono_behaviour.get("volume").unwrap()),
         price: part_mono_behaviour.get("price").unwrap().as_i64().unwrap() as i32,
-        model: model_path,
-        thumbnail: thumbnail_path,
+        model: model_path.into_os_string().into_string().unwrap(),
+        thumbnail: thumbnail_path.map(|x| x.into_os_string().into_string().unwrap()),
         collider: vec3_from_yaml(box_collider.get("m_Size").unwrap()),
         center: vec3_from_yaml(box_collider.get("m_Center").unwrap()),
         weapon: None

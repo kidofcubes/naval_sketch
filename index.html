@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<style>
+    html, body {
+        width: 100vw;
+        margin: 0px;
+        padding: 0px;
+    }
+    body {
+        height: 100vh;
+        overflow: hidden;
+    }
+    canvas {
+        width: 100vw !important;
+        height: 100vh !important;
+    }
+</style>
+<body style="margin: 0px;">
+    <canvas id="game-canvas"></canvas>
+    
+    <script type="module">
+        import init from './naval_sketch.js'
+
+        init().catch((error) => {
+            if (!error.message.startsWith("Using exceptions for control flow, don't mind me. This isn't actually an error!")) {
+                throw error;
+            }
+        });
+
+        let canvas;
+        function onResizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            ctx.fillStyle = "rgba(64, 64, 64, 0.7)";
+        }
+
+        if(document.readyState!=='loading'){
+            onPageLoad();
+        } else {
+            document.addEventListener('DOMContentLoaded', function () {
+                onPageLoad();
+            }, false);
+        }
+
+
+        function onPageLoad(){
+            canvas = document.getElementById("game-canvas");
+            onResizeCanvas();
+            window.addEventListener('resize', onResizeCanvas, false);
+        }
+    </script>
+</body>
+
+</html>

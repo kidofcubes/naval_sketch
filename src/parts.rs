@@ -3,7 +3,7 @@ use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, log
 use dirs::cache_dir;
 use enum_collections::{EnumMap, Enumerated};
 use serde::{de::Visitor, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
-use crate::{asset_extractor::{get_all_parts, get_builtin_parts, get_workshop_parts, LocalPaths}, editor::Selected, editor_ui::{get_base_part_entity, Language}, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret, InitData};
+use crate::{parts_loader::{get_all_parts, get_builtin_parts, get_workshop_parts, LocalPaths}, editor::Selected, editor_ui::{get_base_part_entity, Language}, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret, parts_loader::PartData, InitData};
 use crate::parsing::{AdjustableHull, BasePart, Part};
 use core::f32;
 use std::{fs::create_dir_all, path::PathBuf};
@@ -12,7 +12,6 @@ use std::{fs::create_dir_all, path::PathBuf};
 #[derive(Resource)]
 pub struct PartRegistry {
     pub parts: HashMap<i32,PartData>,
-    pub path_prefix: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,53 +45,7 @@ impl MultiLangString {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PartData {
-    pub id: i32,
-    pub part_name: MultiLangString,
-    pub part_description: MultiLangString,
-    pub builder_class: i32, //-1 is not found/invalid
-    pub weapon_type: i32, //-1 is not found/invalid
-    pub nation: u32,
-    pub armor: i32,
-    pub density: f32,
-    pub price: i32,
-    pub volume: f32,
-    pub center: Vec3,
-    //collier is half lengths
-    pub collider: Vec3,
-    pub weapon: Option<WeaponData>,
-    pub model: PathBuf,
-    pub thumbnail: Option<PathBuf>
-}
-impl PartData {
-    pub fn model_asset_path(&self, prefix: Option<&Path>) -> String {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let root = web_sys::window().unwrap().location().origin().unwrap();
-            return root.to_owned()+"/"+self.model.to_str().unwrap();
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            return prefix.unwrap().join(self.model.clone());
-        }
-    }
-    pub fn thumbnail_asset_path(&self, prefix: Option<&Path>) -> Option<String> {
-        if self.thumbnail.is_none() {
-            return None;
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let root = web_sys::window().unwrap().location().origin().unwrap();
-            return Some(root.to_owned()+"/"+self.thumbnail.as_ref().unwrap().to_str().unwrap());
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            return Some(prefix.unwrap().join(self.thumbnail.clone().unwrap()));
-        }
-    }
 
-}
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct WeaponData {
@@ -404,14 +357,14 @@ pub fn place_part<'a>(
         // println!("looking for part with id {:?}",&part.base_part().id);
         // println!("loaded parts are {:?}",part_registry.parts.keys());
         //let asset_path = AssetPath::from(part_data.model_asset_path(part_registry.path_prefix.as_deref())); 
-        let asset_path = AssetPath::from(part_data.model_asset_path(part_registry.path_prefix.as_deref())); 
-        let mut handle = asset_server.get_handle(&asset_path);
+        //let asset_path = AssetPath::from(part_data.model_asset_path(part_registry.path_prefix.as_deref())); 
+        let mut handle = asset_server.get_handle(part_data.model.clone());
         if handle.is_none() {
             handle = Some(asset_server.load(
-                 GltfAssetLabel::Scene(0).from_asset(
-                     asset_path
-                 )
-             ));
+                GltfAssetLabel::Scene(0).from_asset(
+                    part_data.model.clone()
+                )
+            ));
         }
         let unwrapped = handle.unwrap();
 

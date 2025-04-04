@@ -3,14 +3,14 @@ mod cam_movement;
 mod editor;
 mod editor_ui;
 mod parts;
-mod asset_extractor;
+mod parts_loader;
 mod editor_utils;
 mod editor_actions;
 mod transform_gizmo_bevy;
 mod transform_gizmo;
 
-use asset_extractor::{get_all_parts, LocalPaths};
-use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::{futures, HashMap}};
+use parts_loader::{get_all_parts, LocalPaths, PartLoaderPlugin};
+use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::{futures, HashMap}, window::WindowResolution};
 use bevy_egui::EguiPlugin;
 use bevy_web_asset::WebAssetPlugin;
 use cam_movement::CameraMovementPlugin;
@@ -311,6 +311,39 @@ fn main() {
                 });
     }
 
+
+    let mut default_plugins = DefaultPlugins.set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                        // WARN this is a native only feature. It will not work with webgl or webgpu
+                        // features: WgpuFeatures::POLYGON_MODE_LINE,
+                        ..default()
+                    }),
+                    ..default()
+                }).set(
+                        AssetPlugin {
+                            watch_for_changes_override: Some(false),
+                            mode: AssetMode::Unprocessed,
+                            meta_check: bevy::asset::AssetMetaCheck::Never,
+                            ..default()
+                        }
+                );
+    
+    #[cfg(target_arch = "wasm32")]
+    {
+        default_plugins = default_plugins.set(
+            WindowPlugin {
+                primary_window: Some(Window {
+                    // provide the ID selector string here
+                    canvas: Some("#game-canvas".into()),
+                    // ... any other window properties ...
+                    ..default()
+                }),
+                ..default()
+            }
+        )
+    }
+
+
     App::new()
         .insert_resource(InitData {
             file_path,
@@ -339,21 +372,8 @@ fn main() {
 
         .add_plugins((
                 WebAssetPlugin::default(),
-                DefaultPlugins.set(RenderPlugin {
-                    render_creation: RenderCreation::Automatic(WgpuSettings {
-                        // WARN this is a native only feature. It will not work with webgl or webgpu
-                        // features: WgpuFeatures::POLYGON_MODE_LINE,
-                        ..default()
-                    }),
-                    ..default()
-                }).set(
-                        AssetPlugin {
-                            watch_for_changes_override: Some(false),
-                            mode: AssetMode::Unprocessed,
-                            meta_check: bevy::asset::AssetMetaCheck::Never,
-                            ..default()
-                        }
-                ),
+                default_plugins,
+                PartLoaderPlugin,
                 WireframePlugin,
                 CameraMovementPlugin,
                 MeshPickingPlugin,
