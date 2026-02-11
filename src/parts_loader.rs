@@ -101,57 +101,32 @@ pub struct PartData {
     pub thumbnail: Option<String>
 }
 
-// impl PartData {
-    // pub fn model_asset_path(&self, prefix: Option<&Path>) -> String {
-    //     #[cfg(target_arch = "wasm32")]
-    //     {
-    //         let root = web_sys::window().unwrap().location().origin().unwrap();
-    //         return root.to_owned()+"/"+self.model.to_str().unwrap();
-    //     }
-    //     #[cfg(not(target_arch = "wasm32"))]
-    //     {
-    //         return prefix.unwrap().join(self.model.clone());
-    //     }
-    // }
-    // pub fn thumbnail_asset_path(&self, prefix: Option<&Path>) -> Option<String> {
-    //     if self.thumbnail.is_none() {
-    //         return None;
-    //     }
-    //     #[cfg(target_arch = "wasm32")]
-    //     {
-    //         return Some(root.to_owned()+"/"+self.thumbnail.as_ref().unwrap().to_str().unwrap());
-    //     }
-    //     #[cfg(not(target_arch = "wasm32"))]
-    //     {
-    //         return Some(prefix.unwrap().join(self.thumbnail.clone().unwrap()));
-    //     }
-    // }
-// }
-
-
-
 pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartData>, Box<dyn std::error::Error>> {
-    info!("STARTD GETTING ALL PARTS");
     if let Some(local_paths) = local_paths {
-        let parts_path = local_paths.cache_folder.join("parts.json"); 
-        if Path::exists(&parts_path) {
-            let string = fs::read_to_string(parts_path)?;
-            let parts: Vec<PartData> = serde_json::from_str(&string)?;
-            return Ok(parts);
-        }
-        info!("THE CACHE IS {:?}",local_paths.cache_folder);
+        let parts_path = local_paths.cache_folder.join("assets").join("parts.json"); 
+        info!("the parts path is {:?}",parts_path);
 
         let mut parts: Vec<PartData> = Vec::new();
-        parts.append(&mut get_builtin_parts(&local_paths.game_folder, &local_paths.cache_folder));
-        parts.append(&mut get_workshop_parts(&local_paths.workshop_folder, &local_paths.cache_folder));
+        println!("the thing is {:?}",parts_path);
+        if Path::exists(&parts_path) {
+            let string = fs::read_to_string(parts_path)?;
+            parts = serde_json::from_str(&string)?;
+        }else{
+            parts.append(&mut get_builtin_parts(&local_paths.game_folder, &local_paths.cache_folder));
+            parts.append(&mut get_workshop_parts(&local_paths.workshop_folder, &local_paths.cache_folder));
 
-        let json = serde_json::to_string(&parts).unwrap();
-        fs::write(parts_path,json)?;
+            let json = serde_json::to_string(&parts).unwrap();
+            fs::write(parts_path,json)?;
+        }
+
+
+        let prefix = local_paths.cache_folder.join("assets/");
+        info!("the prefix is {:?}",prefix);
 
         for part in parts.iter_mut() {
-            part.model = (local_paths.cache_folder.join(PathBuf::from(part.model.clone()))).into_os_string().into_string().unwrap();
+            part.model = (prefix.join(PathBuf::from(part.model.clone()))).into_os_string().into_string().unwrap();
             if part.thumbnail.is_some() {
-                part.thumbnail = Some((local_paths.cache_folder.join(PathBuf::from(part.thumbnail.clone().unwrap()))).into_os_string().into_string().unwrap());
+                part.thumbnail = Some((prefix.join(PathBuf::from(part.thumbnail.clone().unwrap()))).into_os_string().into_string().unwrap());
             }
         }
 
@@ -164,25 +139,18 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
 
         #[cfg(target_arch = "wasm32")]
         {
-            info!("OKALSDFKJLASFDKJASFKLJASHFKJLSKLJFASLKJHFLSKJAFKLJAHSFLKJHSAFLHKJSAFKLJHKJLFAKJLFJKHSALFKJLASFKLJSAKL");
-            
             let mut temp = web_sys::window().unwrap().location().pathname().unwrap().split_inclusive('/').map(|x| x.to_string()).collect::<Vec<String>>();
             if temp.len()>1 {
                 temp.pop();
             }
             let prefix = (web_sys::window().unwrap().location().origin().unwrap()+&temp.join(""))+"assets/";
-            info!("PREFIX IS {:?}",prefix);
 
             let resp = gloo_net::http::Request::get(&(prefix.clone()+"parts.json"))
                 .send()
                 .await
                 .unwrap();
-            info!("THING IS {:?}",resp.status());
-            info!("ITS {:?}",resp.status());
             let text = resp.text().await.unwrap();
-            info!("TEXT IS {:?}",text);
             let mut parts: Vec<PartData> = serde_json::from_str(&text).unwrap();
-            info!("PARTS LENGTH IS {:?}",parts.len());
 
             for part in parts.iter_mut() {
                 part.model = prefix.clone()+&part.model;

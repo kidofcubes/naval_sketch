@@ -279,9 +279,7 @@ fn main() {
     {
         console_log::init_with_level(log::Level::Error);
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-        info!("THING ALKSDHFKAJ");
         // futures::executor::block_on(get_all_parts(None));
-        info!("THING ALKSDHFKAJ 2");
         // .await;
     }
     

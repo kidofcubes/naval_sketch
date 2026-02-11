@@ -128,7 +128,15 @@ fn setup_ui(
 
 }
 
+fn test_get_data(
+){
 
+}
+
+
+
+
+#[allow(clippy::too_many_arguments)]
 fn egui_update(
     mut contexts: EguiContexts,
     mut editor_data: ResMut<EditorData>,
