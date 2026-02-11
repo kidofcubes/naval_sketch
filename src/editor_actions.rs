@@ -1,7 +1,9 @@
 use core::f32;
+use std::collections::HashMap;
 use std::ops::Deref;
 
-use bevy::{app::App, asset::{AssetServer, Assets}, color::Color, ecs::{event::Event, system::Commands}, math::{Dir3, EulerRot, Isometry3d, Quat, Vec3}, pbr::StandardMaterial, picking::mesh_picking::ray_cast::{MeshRayCast, RayCastSettings}, prelude::{Camera, Entity, Gizmos, GlobalTransform, Query, Res, ResMut, Single, Transform, Trigger, With}, render::mesh::Mesh, state::commands, utils::HashMap, window::Window};
+use bevy::{app::App, asset::{AssetServer, Assets}, color::Color, ecs::{event::Event, system::Commands}, math::{Dir3, EulerRot, Isometry3d, Quat, Vec3}, pbr::StandardMaterial, picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings}, prelude::{Camera, Entity, Gizmos, GlobalTransform, Query, Res, ResMut, Single, Transform, With}, state::commands, window::Window};
+use bevy::prelude::{Mesh, On};
 use enum_collections::Enumerated;
 
 use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, EditorOptions, Selected}, editor_ui::{Hovered, Language, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, get_collider, place_part, unity_to_bevy_quat, unity_to_bevy_translation, PartAttributes, PartRegistry}};
@@ -31,7 +33,7 @@ pub fn add_actions(app: &mut App) {
 }
 
 pub fn modify_selected_attribute(
-    trigger: Trigger<EditorActionEvent>,
+    trigger: On<EditorActionEvent>,
     editor_data: Res<EditorData>,
     editor_options: Res<EditorOptions>,
     part_registry: Res<PartRegistry>,
@@ -143,7 +145,7 @@ pub fn modify_selected_attribute(
 
 
 pub fn switch_selected_attribute(
-    trigger: Trigger<EditorActionEvent>,
+    trigger: On<EditorActionEvent>,
     mut display_properties: ResMut<PropertiesDisplayData>,
 ){
     let EditorActionEvent::SwitchSelectedAttribute{offset, do_loop} = trigger.event() else {return;};
@@ -166,7 +168,7 @@ pub fn switch_selected_attribute(
 
 
 pub fn move_selected_relative_dir(
-    trigger: Trigger<EditorActionEvent>,
+    trigger: On<EditorActionEvent>,
     selected: Query<Entity, With<Selected>>,
     mut all_parts: Query<(&mut BasePart, Option<&mut AdjustableHull>)>,
     camera_transform: Single<(&Camera, &GlobalTransform, &EditorCamera)>,
@@ -191,7 +193,7 @@ pub fn move_selected_relative_dir(
 //need to figure out what to do when multiple parts
 
 pub fn smart_move_selected_relative_dir(
-    trigger: Trigger<EditorActionEvent>,
+    trigger: On<EditorActionEvent>,
     selected: Query<Entity, With<Selected>>,
     //camera_transform: &Query<&Transform, With<Camera3d>>,
     camera_query: Single<(&Camera, &GlobalTransform, &EditorCamera)>,
@@ -231,11 +233,11 @@ pub fn smart_move_selected_relative_dir(
                 let face = cuboid_face(nearby_transform, nearby.1);
                 let mut dotted_dist = face.1-selected_shared_face.1;
 
-                possible_positions.try_insert(i, Vec::new());
+                possible_positions.insert(i, Vec::new());
                 possible_positions.get_mut(&i).unwrap().push((face.1-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()));
                 possible_positions.get_mut(&i).unwrap().push((nearby_transform.translation-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()));
 
-                possible_positions.try_insert((i+3)%6, Vec::new());
+                possible_positions.insert((i+3)%6, Vec::new());
                 possible_positions.get_mut(&((i+3)%6)).unwrap().push(((face.1-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()))*-1.0);
                 possible_positions.get_mut(&((i+3)%6)).unwrap().push(((nearby_transform.translation-selected_bounding_box.translation).dot(selected_shared_face.0.0.normalize()))*-1.0);
 
@@ -341,7 +343,7 @@ pub struct EditorSettingChange {
 }
 
 pub fn set_editor_settings(
-    trigger: Trigger<EditorActionEvent>,
+    trigger: On<EditorActionEvent>,
     mut editor_options: ResMut<EditorOptions>,
     mut editor_data: ResMut<EditorData>,
 ){
@@ -354,7 +356,7 @@ pub fn set_editor_settings(
 
 
 pub fn spawn_new_part(
-    trigger: Trigger<EditorActionEvent>,
+    trigger: On<EditorActionEvent>,
     mut editor_options: ResMut<EditorOptions>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -399,7 +401,7 @@ pub fn spawn_new_part(
 
     //let Some((hit_entity, hit)) = ray_cast.cast_ray(ray, &RayCastSettings::default()).first() else {return;};
     
-    if let Ok(hovered_entity) = hovered.get_single() {
+    if let Ok(hovered_entity) = hovered.single() {
         if let Ok(hit_entity_components) = part_query.get(hovered_entity) {
             let a_adj_hull = if let Part::AdjustableHull(_,adj_hull) = part_data { Some(adj_hull) }else{None};
             let mut a = get_collider(part_data.base_part(), a_adj_hull.as_ref(), part_registry.parts.get(part_id).unwrap());
@@ -444,7 +446,7 @@ pub fn spawn_new_part(
 }
 
 pub fn copy(
-    trigger: Trigger<EditorActionEvent>,
+    trigger: On<EditorActionEvent>,
     mut editor_data: ResMut<EditorData>,
     selected_parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>), With<Selected>>,
 ){
@@ -458,7 +460,7 @@ pub fn copy(
 
 
 pub fn paste(
-    trigger: Trigger<EditorActionEvent>,
+    trigger: On<EditorActionEvent>,
     mut editor_data: ResMut<EditorData>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -495,7 +497,7 @@ pub fn paste(
         let single_paste = editor_data.clipboard.first().unwrap();
 
 
-        if let Ok(hovered_entity) = hovered.get_single() {
+        if let Ok(hovered_entity) = hovered.single() {
             if let Ok(hit_entity_components) = part_query.get(hovered_entity) {
                 let thing = single_paste.to_optionals();
                 let mut a = get_collider(thing.0, thing.1, part_registry.parts.get(&single_paste.base_part().id).unwrap());

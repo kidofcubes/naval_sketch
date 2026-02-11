@@ -1,6 +1,6 @@
-use bevy::{input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, pbr::ScreenSpaceAmbientOcclusion, picking::focus::HoverMap, prelude::*};
-use crate::transform_gizmo_bevy::GizmoCamera;
+use bevy::{input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, pbr::ScreenSpaceAmbientOcclusion, prelude::*};
 use std::f32::consts::FRAC_PI_2;
+use bevy::picking::hover::HoverMap;
 
 /// A vector representing the player's input, accumulated over all frames that ran
 /// since the last time the physics simulation was advanced.
@@ -42,11 +42,11 @@ impl Plugin for CameraMovementPlugin {
                     // The physics simulation needs to know the player's input, so we run this before the fixed timestep loop.
                     // Note that if we ran it in `Update`, it would be too late, as the physics simulation would already have been advanced.
                     // If we ran this in `FixedUpdate`, it would sometimes not register player input, as that schedule may run zero times per frame.
-                    handle_input.in_set(RunFixedMainLoopSystem::BeforeFixedMainLoop),
+                    handle_input.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
                     // The player's visual representation needs to be updated after the physics simulation has been advanced.
                     // This could be run in `Update`, but if we run it here instead, the systems in `Update`
                     // will be working with the `Transform` that will actually be shown on screen.
-                    interpolate_rendered_transform.in_set(RunFixedMainLoopSystem::AfterFixedMainLoop),
+                    interpolate_rendered_transform.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop),
                 ),
             )
             .add_systems(Update,(move_player,grab_mouse))
@@ -71,7 +71,7 @@ pub fn spawn_player(mut commands: Commands) {
         PreviousPhysicalTranslation::default(),
         ScreenSpaceAmbientOcclusion::default(),
         EditorCamera,
-        GizmoCamera,
+        // GizmoCamera,
     ));
 }
 
@@ -195,7 +195,7 @@ pub fn move_player(
     //     return;
     // }
 
-    let Ok(mut transform) = player.get_single_mut() else {
+    let Ok(mut transform) = player.single_mut() else {
         return;
     };
 

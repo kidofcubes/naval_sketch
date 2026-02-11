@@ -4,6 +4,7 @@ use std::{error::Error, fmt::Display, fs, path::Path};
 use bevy::{color::Color, math::Vec3, prelude::Component};
 use quick_xml::{events::{BytesStart, Event}, Reader};
 use regex::Regex;
+use anyhow::{anyhow, Result};
 
 #[derive(Component, Debug, Copy, Clone)]
 pub struct BasePart {
@@ -147,7 +148,7 @@ impl Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-pub fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Result<String> {
     //println!("checking the {:?} which was {:?}", field_name, str::from_utf8(e.try_get_attribute(field_name)?.unwrap().value.as_ref()));
 
     return Ok(str::from_utf8(e.try_get_attribute(field_name)?
@@ -155,7 +156,7 @@ pub fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Resu
         .value.as_ref())?.to_string());
 }
 
-pub fn load_save(file_path: &Path) -> Result<Vec<Part>, Box<dyn Error>> {
+pub fn load_save(file_path: &Path) -> Result<Vec<Part>> {
     //let xml = fs::read_to_string(&file_path).expect("Should have been able to read the file");
     let xml = fs::read_to_string(&file_path)?;
 

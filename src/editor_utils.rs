@@ -1,6 +1,6 @@
 use core::f32;
-
-use bevy::{color::Color, math::{bounding::Aabb3d, Dir3, Quat, Ray3d, Vec3, Vec3A}, prelude::{Gizmos, InfinitePlane3d, Transform}, reflect::List, utils::HashMap};
+use std::collections::HashMap;
+use bevy::{color::Color, math::{bounding::Aabb3d, Dir3, Quat, Ray3d, Vec3, Vec3A}, prelude::{Gizmos, InfinitePlane3d, Transform}, reflect::List};
 use enum_collections::{EnumMap, Enumerated};
 
 use crate::parsing::AdjustableHull;

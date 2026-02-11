@@ -1,5 +1,5 @@
 use std::{fmt::Display, iter::once, ops::Deref, path::Path};
-use bevy::{asset::{AssetPath, RenderAssetUsages}, hierarchy::HierarchyEvent, log::tracing_subscriber::filter::combinator::And, prelude::*, reflect::List, render::{mesh::Indices, view::RenderLayers}, tasks::ComputeTaskPool, utils::HashMap};
+use bevy::{asset::{AssetPath, RenderAssetUsages}, log::tracing_subscriber::filter::combinator::And, prelude::*, reflect::List, tasks::ComputeTaskPool};
 use dirs::cache_dir;
 use enum_collections::{EnumMap, Enumerated};
 use serde::{de::Visitor, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
@@ -7,7 +7,10 @@ use crate::{parts_loader::{get_all_parts, get_builtin_parts, get_workshop_parts,
 use crate::parsing::{AdjustableHull, BasePart, Part};
 use core::f32;
 use std::{fs::create_dir_all, path::PathBuf};
-
+use std::collections::HashMap;
+use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::event::Trigger;
+use bevy::mesh::{Indices, PrimitiveTopology};
 
 #[derive(Resource)]
 pub struct PartRegistry {
@@ -287,13 +290,13 @@ pub struct BasePartMesh{
 pub fn on_part_meshes_init(
     mut mesh_query: Query<(Entity, &mut MeshMaterial3d<StandardMaterial>), Added<Mesh3d>>,
     base_part_query: Query<&BasePart>,
-    parent_query: Query<&Parent>,
+    parent_query: Query<&ChildOf>,
     mut base_part_meshes_query: Query<&mut BasePartMeshes>,
     layer_query: Query<&RenderLayers>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
 ){
-    let mut temp = bevy::utils::HashMap::new();
+    let mut temp = HashMap::new();
     for mut entity in &mut mesh_query {
         if let Some(base_part_entity) = get_base_part_entity(&parent_query, &base_part_query, entity.0) {
             if let Ok(base_part_meshes) = &mut base_part_meshes_query.get_mut(base_part_entity) {
@@ -342,7 +345,7 @@ pub fn place_part<'a>(
 
 
     if let Part::AdjustableHull(base_part, adjustable_hull) = part {
-        let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD);
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD);
         
         generate_adjustable_hull_mesh(
             &mut mesh,
@@ -360,7 +363,7 @@ pub fn place_part<'a>(
         //let asset_path = AssetPath::from(part_data.model_asset_path(part_registry.path_prefix.as_deref())); 
         let mut handle = asset_server.get_handle(part_data.model.clone());
         if handle.is_none() {
-            handle = Some(asset_server.load(
+            handle = Some(asset_server.load_override(
                 GltfAssetLabel::Scene(0).from_asset(
                     part_data.model.clone()
                 )
@@ -393,9 +396,9 @@ pub fn place_part<'a>(
     return Ok(());
 }
 
-fn initalize_part_scene(trigger: Trigger<HierarchyEvent>, children: Query<&Children>){
-    println!("TRIGGERED EVENT FOR {:?} which was {:?}",trigger.entity(),trigger.event());
-}
+// fn initalize_part_scene(trigger: dyn Trigger<HierarchyEvent>, children: Query<&Children>){
+//     println!("TRIGGERED EVENT FOR {:?} which was {:?}",trigger.entity(),trigger.event());
+// }
 
 pub fn base_part_to_bevy_transform(base_part: &BasePart) -> Transform{
 

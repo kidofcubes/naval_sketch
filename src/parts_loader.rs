@@ -1,12 +1,15 @@
-use std::{error::Error, ffi::OsStr, fs::{self, create_dir_all, read_dir, File, ReadDir}, path::{Path, PathBuf}, sync::Arc, time::Duration};
-
-use bevy::{app::Plugin, asset::AssetPath, ecs::system::Resource, log::{self, debug, info}, math::Vec3, reflect::List, render::RenderPlugin, utils::HashMap};
+use std::{ffi::OsStr, fs::{self, create_dir_all, read_dir, File, ReadDir}, path::{Path, PathBuf}, sync::Arc, time::Duration};
+use std::collections::HashMap;
+use bevy::{app::Plugin, asset::AssetPath, log::{self, debug, info}, math::Vec3, reflect::List, render::RenderPlugin};
+use bevy::prelude::*;
 use csv::StringRecord;
 use quick_xml::Reader;
 
 use regex::Regex;
+use reqwest::blocking::Response;
 use serde::{Deserialize, Serialize};
 use yaml_rust2::Yaml;
+use anyhow::{anyhow, Result};
 
 use crate::{editor_ui::Language, parsing::get_attribute_string, parts::{MultiLangString, PartRegistry, WeaponData}, InitData};
 
@@ -101,9 +104,10 @@ pub struct PartData {
     pub thumbnail: Option<String>
 }
 
-pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartData>, Box<dyn std::error::Error>> {
+pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartData>> {
     if let Some(local_paths) = local_paths {
-        let parts_path = local_paths.cache_folder.join("assets").join("parts.json"); 
+        let prefix = local_paths.cache_folder.join("assets/");
+        let parts_path = prefix.join("parts.json");
         info!("the parts path is {:?}",parts_path);
 
         let mut parts: Vec<PartData> = Vec::new();
@@ -116,17 +120,17 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
             parts.append(&mut get_workshop_parts(&local_paths.workshop_folder, &local_paths.cache_folder));
 
             let json = serde_json::to_string(&parts).unwrap();
+            create_dir_all(prefix.clone()).unwrap();
             fs::write(parts_path,json)?;
         }
 
 
-        let prefix = local_paths.cache_folder.join("assets/");
         info!("the prefix is {:?}",prefix);
 
         for part in parts.iter_mut() {
-            part.model = (prefix.join(PathBuf::from(part.model.clone()))).into_os_string().into_string().unwrap();
+            part.model = (local_paths.cache_folder.join(PathBuf::from(part.model.clone()))).into_os_string().into_string().unwrap();
             if part.thumbnail.is_some() {
-                part.thumbnail = Some((prefix.join(PathBuf::from(part.thumbnail.clone().unwrap()))).into_os_string().into_string().unwrap());
+                part.thumbnail = Some((local_paths.cache_folder.join(PathBuf::from(part.thumbnail.clone().unwrap()))).into_os_string().into_string().unwrap());
             }
         }
 
@@ -134,7 +138,7 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
     }else{
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return Err("no part paths")?;
+            return Err(anyhow!("no part paths"));
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -204,9 +208,10 @@ pub fn get_builtin_parts(game_folder: &Path, cache_folder: &Path) -> Vec<PartDat
 
     for result in part_descriptions_csv.records() {
         let record = result.unwrap();
-        //println!("THING IS {:?}", record);
-        let part_id = (record.get(0).unwrap()[1..]).parse::<i32>().unwrap();
-        part_descriptions.insert(part_id,record);
+        // println!("THING IS {:?}", record);
+        if let Some(part_id) = (record.get(0).and_then(|x| x.get(1..))).and_then(|x| x.parse::<i32>().ok()) {
+            part_descriptions.insert(part_id,record);
+        }
     }
 
 
@@ -486,13 +491,14 @@ struct GameObject {
     children: Vec<Box<GameObject>>
 }
 impl GameObject {
-    fn get_transform(&self) -> &HashMap<String,Yaml> {
-        return &self.components.iter().filter(|thing2| {thing2.0=="Transform"}).next().unwrap().1;
+    fn get_transform(&self) -> Option<&HashMap<String,Yaml>> {
+        return self.components.iter().filter(|thing2| {thing2.0=="Transform"}).next().and_then(|x| {Some(&(x.1))});
     }
 
     fn take_children_recursive(&mut self, gameobjects: &mut Vec<GameObject>){
         let to_take: Vec<usize> = gameobjects.iter().enumerate().filter_map(|thing| {
-            if thing.1.get_transform().get("m_Father").unwrap().as_hash().unwrap().get(&Yaml::from_str("fileID")).unwrap().as_i64().unwrap() as usize==self.id {
+            // if thing.1.get_transform()?.get("m_Father").unwrap().as_hash().unwrap().get(&Yaml::from_str("fileID")).unwrap().as_i64().unwrap() as usize==self.id {
+            if thing.1.get_transform()?.get("m_Father")?.as_hash()?.get(&Yaml::from_str("fileID"))?.as_i64()? as usize == self.id {
                 return Some(thing.0);
             }else{
                 return None;
@@ -539,28 +545,31 @@ fn parse_prefab(path: &Path) -> GameObject{
 
         let mut keys: Vec<Yaml> = Vec::new(); 
         attributes_hashmap.keys().for_each(|key| {keys.push(key.clone());});
+        // println!("theres a component {:?}",component_type);
 
         for key in keys {
             let key_str = key.clone().into_string().unwrap();
             attribute_map.insert(key_str,attributes_hashmap.remove(&key).unwrap());
-            //println!("the component {:?} has attribute {:?}",component_type,attribute);
+            // println!("the component {:?} has attribute {:?}",component_type,key);
         }
 
         
 
         if component_type.as_str().unwrap() == "GameObject" {
-            gameobjects.try_insert(component.0, GameObject { id: component.0, components: Vec::new(), children: Vec::new() });
+            gameobjects.insert(component.0, GameObject { id: component.0, components: Vec::new(), children: Vec::new() });
             gameobjects.get_mut(&component.0).unwrap().components.push((component_type.as_str().unwrap().to_string(),attribute_map));
         }else {
             let gameobject_id = attribute_map.get("m_GameObject").unwrap().as_hash().unwrap().get(&Yaml::from_str("fileID")).unwrap().as_i64().unwrap() as usize;
-            gameobjects.try_insert(gameobject_id, GameObject { id: gameobject_id, components: Vec::new(), children: Vec::new() });
+            // gameobjects.insert(gameobject_id, GameObject { id: gameobject_id, components: Vec::new(), children: Vec::new() });
             gameobjects.get_mut(&gameobject_id).unwrap().components.push((component_type.as_str().unwrap().to_string(),attribute_map));
         }
     }
 
+    // println!("path {:?} objects {:?}", path, gameobjects);
+
     let root_key = gameobjects.iter().filter_map(|thing| {
 
-        if thing.1.get_transform().get("m_Father").unwrap().as_hash().unwrap().get(&Yaml::from_str("fileID")).unwrap().as_i64().unwrap()==0 {
+        if thing.1.get_transform()?.get("m_Father")?.as_hash()?.get(&Yaml::from_str("fileID"))?.as_i64()?==0 {
             return Some(thing.0);
         }else{
             return None;
@@ -636,7 +645,7 @@ struct ModPart {
 //         .value.as_ref())?.to_string());
 // }
 
-fn load_mod_config_file(file_path: &Path) -> Result<ModConfig,Box<dyn Error>> {
+fn load_mod_config_file(file_path: &Path) -> Result<ModConfig> {
     let xml = fs::read_to_string(file_path).expect("Should have been able to read the file");
     let mut reader = Reader::from_str(xml.as_str());
     //reader.config_mut().trim_text(true);
@@ -729,40 +738,45 @@ fn load_mod_config_file(file_path: &Path) -> Result<ModConfig,Box<dyn Error>> {
 
 fn load_folder(path: &Path){
     let params = [("path", path)];
-    // generate_request("/LoadFolder")
-    //     .form(&params)
-    //     .send().unwrap();
+    let response = generate_request("/LoadFolder")
+        .form(&params)
+        .send().unwrap();
+    println!("{:?}",response.text().unwrap());
 }
 
 fn load_file(path: &Path){
     let params = [("path", path)];
-    // generate_request("/LoadFile")
-    //     .form(&params)
-    //     .send().unwrap();
+    let response = generate_request("/LoadFile")
+        .form(&params)
+        .send().unwrap();
+    println!("{:?}",response.text().unwrap());
 }
 
 fn extract_unity_project_to(path: &Path){
     let params = [("path", path)];
-    // generate_request("/Export/UnityProject")
-    //     .form(&params)
-    //     .send().unwrap();
+    let response = generate_request("/Export/UnityProject")
+        .form(&params)
+        .send().unwrap();
+    println!("{:?}",response.text().unwrap());
 }
 
 fn extract_primary_content_to(path: &Path){
     let params = [("path", path)];
-    // generate_request("/Export/PrimaryContent")
-    //     .form(&params)
-    //     .send().unwrap();
+    let response = generate_request("/Export/PrimaryContent")
+        .form(&params)
+        .send().unwrap();
+    println!("{:?}",response.text().unwrap());
 }
 
-// fn generate_request(path: &str) -> reqwest::blocking::RequestBuilder{
-//     let client = reqwest::blocking::Client::new();
-//     let mut url = "http://127.0.0.1:8001".to_owned();
-//     url.push_str(path);
-//     return client.post(&url)
-//         //.body("the exact body that is sent")
-//         .timeout(Duration::from_secs(60*60))
-//         // .form(params)
-//         // .send();
-//
-// }
+fn generate_request(path: &str) -> reqwest::blocking::RequestBuilder{
+    let client = reqwest::blocking::Client::new();
+    let mut url = "http://127.0.0.1:8001".to_owned();
+    url.push_str(path);
+    println!("url: {}", url);
+    return client.post(&url)
+        //.body("the exact body that is sent")
+        .timeout(Duration::from_secs(60*60))
+        // .form(params)
+        // .send();
+
+}

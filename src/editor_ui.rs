@@ -1,12 +1,15 @@
 use core::f32;
 use std::{fmt::Display, iter::once, path::Path};
-
-use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{event::EventReader, query::Or, schedule::IntoSystemConfigs, system::Local, world::{OnAdd, OnRemove, World}}, gltf::GltfAssetLabel, hierarchy::ChildBuilder, image::Image, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{DirectionalLight, MeshMaterial3d, StandardMaterial}, picking::{focus::HoverMap, pointer::{PointerInteraction, PointerPress}, PickingBehavior}, prelude::{Added, BuildChildren, Camera, Camera3d, Changed, ChildBuild, Children, Commands, Component, DetectChanges, Down, Entity, Gizmos, HierarchyQueryExt, KeyCode, Mesh3d, Out, Over, Parent, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, Trigger, With}, reflect::List, render::{camera::{ClearColorConfig, OrthographicProjection, Projection, Viewport}, mesh::Mesh, view::RenderLayers}, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, TargetCamera, UiRect, Val}, utils::{default, HashMap}};
-use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibility, Align, Color32, Context, FontData, FontDefinitions, ImageButton, Label, Layout, RichText, Sense, TextEdit, Vec2b, Widget}, EguiContexts};
+use std::collections::HashMap;
+use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{query::Or, system::Local, world::{World}}, gltf::GltfAssetLabel, image::Image, input::{mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, math::{bounding::BoundingVolume, primitives::Cuboid, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, picking::{pointer::{PointerInteraction, PointerPress}}, prelude::{Added, Camera, Camera3d, Changed, Children, Commands, Component, DetectChanges, Entity, Gizmos, KeyCode, Mesh3d, Out, Over, Pointer, PointerButton, Query, RemovedComponents, Res, ResMut, Resource, Single, Text, Transform, With}, reflect::List, scene::{SceneInstance, SceneRoot}, text::{TextColor, TextFont, TextLayout}, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, UiRect, Val}};
+use bevy::ecs::event::Trigger;
+use bevy::picking::hover::HoverMap;
+use bevy::prelude::*;
+use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibility, Align, Color32, Context, FontData, FontDefinitions, ImageButton, Label, Layout, RichText, Sense, TextEdit, Vec2b, Widget}, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, EguiTextureHandle};
 use enum_collections::{EnumMap, Enumerated};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{rngs::SmallRng, Rng, RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
-use crate::{editor::EditorOptions, transform_gizmo_bevy::GizmoTarget};
+use crate::{editor::EditorOptions};
 
 use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMesh, BasePartMeshes, PartAttributes, PartRegistry}};
 
@@ -25,24 +28,24 @@ impl Plugin for EditorUiPlugin {
         app.add_observer(on_unhover);
         app.add_observer(
             |
-                trigger: Trigger<OnAdd, Selected>,
+                trigger: On<Add, Selected>,
                 mut editor_data: ResMut<EditorData>,
                 editor_options: ResMut<EditorOptions>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>), With<Selected>>,
                 mut display_properties: ResMut<PropertiesDisplayData>,
                 mut commands: Commands,
             | {
-                editor_data.latest_selected = Some(trigger.entity());
+                editor_data.latest_selected = Some(trigger.entity);
                 
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().collect();
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
                 update_display_text(&selected_parts, editor_options.group_edit_attributes, &mut display_properties);
-                commands.entity(trigger.entity()).insert(GizmoTarget::default());
+                // commands.entity(trigger.entity).insert(GizmoTarget::default());
             }
         );
         app.add_observer(
             |
-                trigger: Trigger<OnRemove, Selected>,
+                trigger: On<Remove, Selected>,
                 mut editor_data: ResMut<EditorData>,
                 editor_options: ResMut<EditorOptions>,
                 parts: Query<(&BasePart, Option<&AdjustableHull>, Option<&Turret>, Entity), With<Selected>>,
@@ -50,18 +53,18 @@ impl Plugin for EditorUiPlugin {
                 mut commands: Commands,
             | {
                 let selected_parts: Vec<(&BasePart, Option<&AdjustableHull>, Option<&Turret>)> = parts.iter().filter_map(|part| {
-                    if part.3 == trigger.entity() { None } else { Some((part.0,part.1,part.2)) }
+                    if part.3 == trigger.entity { None } else { Some((part.0,part.1,part.2)) }
                 }).collect();
 
                 if let Some(latest_selected) = editor_data.latest_selected {
-                    if trigger.entity()==latest_selected {
+                    if trigger.entity==latest_selected {
                         editor_data.latest_selected = None;
                     }
                 }
                 
                 //update_display_text(&selected_parts, &mut text_query, &display_properties);
                 update_display_text(&selected_parts, editor_options.group_edit_attributes, &mut display_properties);
-                commands.entity(trigger.entity()).remove::<GizmoTarget>();
+                // commands.entity(trigger.entity).remove::<GizmoTarget>();
             }
         );
         app.add_systems(Startup, spawn_ui.after(register_all_parts).after(spawn_player));
@@ -76,8 +79,8 @@ impl Plugin for EditorUiPlugin {
                 history_text_display: None,
             }
         );
-        app.add_systems(Startup, setup_ui.after(register_all_parts));
-        app.add_systems(Update, egui_update);
+        app.add_systems(Update, setup_ui.run_if(run_once).after(EguiStartupSet::InitContexts));
+        app.add_systems(EguiPrimaryContextPass, egui_update);
         app.insert_resource(TestData { part_thumbnails: HashMap::new() } );
     }
 }
@@ -101,7 +104,8 @@ fn setup_ui(
     mut asset_server: ResMut<AssetServer>,
     mut images: ResMut<TestData>,
     part_registry: Res<PartRegistry>,
-){
+) -> Result{
+
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert("my_font".to_owned(),
        std::sync::Arc::new(
@@ -112,16 +116,17 @@ fn setup_ui(
     fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap()
         .insert(0, "my_font".to_owned());
 
-    contexts.ctx_mut().set_fonts(fonts);
+    contexts.ctx_mut()?.set_fonts(fonts);
 
     for part in &part_registry.parts {
         let thumbnail_path = part.1.thumbnail.clone().unwrap_or("no_texture.png".to_string());
         // println!("ADDING PAT {:?}",part.0);
         // let asset_path = AssetPath::from("no_texture.png");
         // images.part_thumbnails.insert(*part.0,asset_server.load(thumbnail_path));
-        images.part_thumbnails.insert(*part.0,asset_server.load(thumbnail_path));
+        images.part_thumbnails.insert(*part.0,asset_server.load_override(thumbnail_path));
                 // ui.image(thumbnail_path);
     }
+    Ok(())
 
 
     //Context::set_fonts(, font_definitions);
@@ -151,7 +156,7 @@ fn egui_update(
 
     mut display_properties: ResMut<PropertiesDisplayData>
 ) {
-    contexts.ctx_mut().memory(|mem|{
+    contexts.ctx_mut().unwrap().memory(|mem|{
         match mem.focused() {
             Some(focused) => {
             },
@@ -166,7 +171,7 @@ fn egui_update(
             //println!("getting {:?} which is {:?}",part.0,images.part_thumbnails.get(part.0));
             rendered_texture_ids.insert(
                 *part.0,contexts.add_image(
-                    images.part_thumbnails.get(part.0).unwrap().clone_weak()
+                    EguiTextureHandle::Strong(images.part_thumbnails.get(part.0).unwrap().clone())
                 )
             );
         }
@@ -178,7 +183,7 @@ fn egui_update(
         .resizable(Vec2b::new(false,false))
         // .max_width(f32::MAX)
         // .max_height(f32::MAX)
-        .show(contexts.ctx_mut(), |ui| {
+        .show(contexts.ctx_mut().unwrap(), |ui| {
             
 
             for attr in PartAttributes::VARIANTS {
@@ -219,7 +224,7 @@ fn egui_update(
         .resizable(Vec2b::new(true,true))
         .scroll(Vec2b::new(true,true))
         .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
-        .show(contexts.ctx_mut(), |ui| {
+        .show(contexts.ctx_mut().unwrap(), |ui| {
             let layout = Layout::left_to_right(Align::TOP).with_main_wrap(true);
             let initial_size = egui::Vec2::new(
                 ui.available_size_before_wrap().x,
@@ -257,7 +262,7 @@ fn egui_update(
 
     egui::Window::new("Settings|设置")
         .resizable(Vec2b::new(false,false))
-        .show(contexts.ctx_mut(), |ui| {
+        .show(contexts.ctx_mut().unwrap(), |ui| {
             ui.checkbox(&mut editor_options.floating, "floating");
             ui.checkbox(&mut editor_options.edit_near, "edit_near");
             ui.checkbox(&mut editor_options.group_edit_attributes, "average_attributes");
@@ -287,6 +292,7 @@ pub struct PropertiesDisplayData {
     pub properties_text_buffers: EnumMap<PartAttributes,String,{PartAttributes::SIZE}>, 
     pub selected: PartAttributes,
 }
+const COZETTE_PATH: &str = "/usr/share/fonts/misc/build/CozetteVector.ttf";
 
 /// Spawn a bit of UI text to explain how to move the player.
 pub fn spawn_ui(
@@ -316,14 +322,14 @@ pub fn spawn_ui(
                 left: Val::Px(12.0),
                 ..default()
             },
-            TargetCamera(*editor_camera),
+            // TargetCamera(*editor_camera),
         ))
         .with_children(|parent| {
             font_data.input_text_display = Some(
                 parent.spawn_empty().insert((
                     Text::new("vimming times"),
                     TextFont {
-                        font: asset_server.load("/usr/share/fonts/TTF/CozetteVector.ttf"),
+                        font: asset_server.load_override(COZETTE_PATH),
                         font_size: font_data.font_size*font_data.mult, 
                         ..default()
                     },
@@ -362,7 +368,7 @@ pub fn spawn_ui(
                         ..default()
                     },
                     TextFont {
-                        font: asset_server.load("/usr/share/fonts/TTF/CozetteVector.ttf"),
+                        font: asset_server.load_override(COZETTE_PATH),
                         font_size: font_data.font_size*font_data.mult, 
                         ..default()
                     },
@@ -375,7 +381,7 @@ pub fn spawn_ui(
 
 /// Updates the scroll position of scrollable nodes in response to mouse input
 pub fn update_scroll_position(
-    mut mouse_wheel_events: EventReader<MouseWheel>,
+    mut mouse_wheel_events: MessageReader<MouseWheel>,
     hover_map: Res<HoverMap>,
     mut scrolled_node_query: Query<&mut ScrollPosition>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -398,8 +404,8 @@ pub fn update_scroll_position(
         for (_pointer, pointer_map) in hover_map.iter() {
             for (entity, _hit) in pointer_map.iter() {
                 if let Ok(mut scroll_position) = scrolled_node_query.get_mut(*entity) {
-                    scroll_position.offset_x -= dx;
-                    scroll_position.offset_y -= dy;
+                    scroll_position.x -= dx;
+                    scroll_position.y -= dy;
                 }
             }
         }
@@ -449,12 +455,12 @@ pub fn render_gizmos(
             is_latest = latest_selected==selected_entity;
         }
         if is_latest {
-            gizmo.cuboid(
+            gizmo.cube(
                 selected_bounding_box,
                 Color::srgb_u8(255, 0, 255)
             );
         }else{
-            gizmo.cuboid(
+            gizmo.cube(
                 selected_bounding_box,
                 Color::srgb_u8(0, 255, 0)
             );
@@ -479,7 +485,7 @@ pub fn render_gizmos(
 
                     for origin_side in AdjHullSide::VARIANTS{
                         let Some(adjacent) = adjacents[*origin_side] else {continue;};
-                        gizmo.cuboid(all_colliders[adjacent.0].0, Color::srgb_u8(255, 0, 255));
+                        gizmo.cube(all_colliders[adjacent.0].0, Color::srgb_u8(255, 0, 255));
                     }
 
                     // let adjacents2 = adjacent_adjustable_hulls((&collider,selected_part.1.unwrap()), &all_colliders);
@@ -561,7 +567,7 @@ pub fn render_gizmos(
 
 
 
-pub fn get_base_part_entity(parent_query: &Query<&Parent>, part_query: &Query<&BasePart>, entity: Entity) -> Option<Entity>{
+pub fn get_base_part_entity(parent_query: &Query<&ChildOf>, part_query: &Query<&BasePart>, entity: Entity) -> Option<Entity>{
     // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
     for base_entity in once(entity).chain(parent_query.iter_ancestors(entity)) {
         if part_query.get(base_entity).is_ok() {
@@ -705,9 +711,9 @@ pub fn update_command_text(
 }
 
 pub fn on_hover(
-    hover: Trigger<Pointer<Over>>,
+    hover: On<Pointer<Over>>,
     part_query: Query<&BasePart>,
-    parent_query: Query<&Parent>,
+    parent_query: Query<&ChildOf>,
     children_query: Query<&Children>,
     mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -716,7 +722,7 @@ pub fn on_hover(
 
     // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
 
-    for base_entity in once(hover.entity()).chain(parent_query.iter_ancestors(hover.entity())) {
+    for base_entity in once(hover.entity).chain(parent_query.iter_ancestors(hover.entity)) {
         if let Ok(base_part) = part_query.get(base_entity) {
             commands.entity(base_entity).insert(Hovered{});
             for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
@@ -730,16 +736,16 @@ pub fn on_hover(
 }
 
 pub fn on_unhover(
-    unhover: Trigger<Pointer<Out>>,
+    unhover: On<Pointer<Out>>,
     part_query: Query<&BasePart>,
-    parent_query: Query<&Parent>,
+    parent_query: Query<&ChildOf>,
     children_query: Query<&Children>,
     mut material_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
 ){
     // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
-    for base_entity in once(unhover.entity()).chain(parent_query.iter_ancestors(unhover.entity())) {
+    for base_entity in once(unhover.entity).chain(parent_query.iter_ancestors(unhover.entity)) {
         if let Ok(base_part) = part_query.get(base_entity) {
             commands.entity(base_entity).remove::<Hovered>();
             for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {

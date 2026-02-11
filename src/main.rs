@@ -6,36 +6,18 @@ mod parts;
 mod parts_loader;
 mod editor_utils;
 mod editor_actions;
-mod transform_gizmo_bevy;
-mod transform_gizmo;
 
 use parts_loader::{get_all_parts, LocalPaths, PartLoaderPlugin};
-use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, utils::{futures, HashMap}, window::WindowResolution};
+use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use bevy_egui::EguiPlugin;
-use bevy_web_asset::WebAssetPlugin;
 use cam_movement::CameraMovementPlugin;
 use editor::{EditorPlugin};
 use parsing::{load_save, AdjustableHull, BasePart, Part};
 use parts::{on_part_meshes_init, place_part, register_all_parts, BasePartMesh, BasePartMeshes, PartRegistry};
-use transform_gizmo::GizmoVisuals;
-use transform_gizmo_bevy::{GizmoHotkeys, GizmoOptions, TransformGizmoPlugin};
 use std::{env, path::{Path, PathBuf}};
+use bevy::asset::UnapprovedPathMode;
+use bevy::ecs::event::Trigger;
 
-
-
-/// Returns an observer that updates the entity's material to the one specified.
-fn update_material_on<E>(
-    new_material: Handle<StandardMaterial>,
-) -> impl Fn(Trigger<E>, Query<&mut MeshMaterial3d<StandardMaterial>>) {
-    // An observer closure that captures `new_material`. We do this to avoid needing to write four
-    // versions of this observer, each triggered by a different event and with a different hardcoded
-    // material. Instead, the event type is a generic, and the material is passed in.
-    move |trigger, mut query| {
-        if let Ok(mut material) = query.get_mut(trigger.entity()) {
-            material.0 = new_material.clone();
-        }
-    }
-}
 
 
 
@@ -47,7 +29,7 @@ fn temp_test_update(
     hull_query: Query<(Entity, &BasePart, &mut AdjustableHull)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     scenes: ResMut<Assets<Scene>>,
-    parent_query: Query<&Parent>,
+    parent_query: Query<&ChildOf>,
     base_part_query: Query<(Entity, &BasePart)>,
     commands: Commands,
     gizmo: Gizmos
@@ -172,7 +154,7 @@ fn setup(
     asset_server: Res<AssetServer>,
     part_registry: Res<PartRegistry>,
     //mut scene_assets: ResMut<Assets<Scene>>,
-    mut ambient_light: ResMut<AmbientLight>,
+    mut ambient_light: ResMut<GlobalAmbientLight>,
     mut config_store: ResMut<GizmoConfigStore>,
 ) {
 
@@ -322,6 +304,7 @@ fn main() {
                             watch_for_changes_override: Some(false),
                             mode: AssetMode::Unprocessed,
                             meta_check: bevy::asset::AssetMetaCheck::Never,
+                            unapproved_path_mode: UnapprovedPathMode::Deny,
                             ..default()
                         }
                 );
@@ -356,29 +339,16 @@ fn main() {
             // Can be changed per mesh using the `WireframeColor` component.
             default_color: Color::WHITE,
         })
-
-        .insert_resource(GizmoOptions {
-            hotkeys: Some(GizmoHotkeys::default()),
-            visuals: GizmoVisuals {
-                inactive_alpha: 0.6,
-                highlight_alpha: 0.8,
-
-                ..default()
-            },
-            ..default()
-        })
-
         .add_plugins((
-                WebAssetPlugin::default(),
+                // WebAssetPlugin,
                 default_plugins,
                 PartLoaderPlugin,
-                WireframePlugin,
+                WireframePlugin::default(),
                 CameraMovementPlugin,
                 MeshPickingPlugin,
                 EditorPlugin,
                 //OutlinePlugin,
-                EguiPlugin,
-                TransformGizmoPlugin
+                EguiPlugin::default(),
                 ))
         .add_systems(Startup, (register_all_parts,setup).chain())
         .add_systems(Update, (temp_test_update, on_part_meshes_init))
