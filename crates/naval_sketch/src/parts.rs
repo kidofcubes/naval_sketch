@@ -1,21 +1,26 @@
 use std::{fmt::Display, iter::once, ops::Deref, path::Path};
-use bevy::{asset::{AssetPath, RenderAssetUsages}, log::tracing_subscriber::filter::combinator::And, prelude::*, reflect::List, tasks::ComputeTaskPool};
 use dirs::cache_dir;
 use enum_collections::{EnumMap, Enumerated};
 use serde::{de::Visitor, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
-use crate::{parts_loader::{get_all_parts, get_builtin_parts, get_workshop_parts, LocalPaths}, editor::Selected, editor_ui::{get_base_part_entity, Language}, editor_utils::{set_adjustable_hull_width, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::Turret, parts_loader::PartData, InitData};
+use crate::{parts_loader::{get_all_parts, get_builtin_parts, get_workshop_parts, LocalPaths}, parsing::Turret, parts_loader::PartData};
 use crate::parsing::{AdjustableHull, BasePart, Part};
 use core::f32;
 use std::{fs::create_dir_all, path::PathBuf};
 use std::collections::HashMap;
-use bevy::camera::visibility::RenderLayers;
-use bevy::ecs::event::Trigger;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use anyhow::{anyhow, Result};
 
 #[derive(Resource)]
 pub struct PartRegistry {
     pub parts: HashMap<i32,PartData>,
 }
+
+#[derive(Enumerated, Debug, Copy, Clone, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum Language {
+    CN,
+    EN,
+    UNSPECIFIED
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiLangString {
@@ -54,84 +59,6 @@ impl MultiLangString {
 pub struct WeaponData {
 }
 
-pub fn register_all_parts(
-    init_data: Res<InitData>,
-    mut part_registry: ResMut<PartRegistry>
-){
-
-
-    // get_all_parts(None);
-    // info!("DONE DOING THE THING 1");
-    // let result = futures::executor::block_on(get_all_parts(init_data.data_paths.as_ref()));
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        // can't get the value out, or pass my resource in (also doesn't seem to block)
-        // wasm_bindgen_futures::spawn_local(async {
-        //     let result = get_all_parts(None).await;
-        //     info!("DONE DOING THE THING 3 ");
-        // });
-        
-        // fails with a panic
-        // ComputeTaskPool::get().scope(|s| {
-        //     s.spawn(async {
-        //         let result = get_all_parts(None).await;
-        //         info!("DONE DOING THE THING 3 ");
-        //     });
-        // });
-
-        // hangs forever
-        // futures::executor::block_on(async{
-        //         let result = get_all_parts(None).await;
-        //         info!("DONE DOING THE THING 4 ");
-        // });
-
-        // let result = pollster::FutureExt::block_on(get_all_parts(None));
-        // info!("DONE DOING THE THING 3 ");
-        
-        
-        // bevy::tasks::block_on(async {
-        //         let result = get_all_parts(None).await;
-        //         info!("DONE DOING THE THING 3 ");
-        //         if let Ok(parts) = result {
-        //             for part in parts {
-        //                 part_registry.parts.insert(part.id,part);
-        //             }
-        //         }
-        //         info!("DONE DOING THE THING 4 ");
-        //
-        //
-        // });
-        info!("DONE DOING THE THING 5 ");
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let result = futures_lite::future::block_on(get_all_parts(init_data.data_paths.as_ref()));
-        if let Ok(parts) = result {
-            for part in parts {
-                part_registry.parts.insert(part.id,part);
-            }
-        }
-
-    }
-    // info!("DONE DOING THE THING 2 {:?}",result.unwrap().len());
-    
-    
-    // let workshop_parts = get_workshop_parts(&workshop_folder, &cache_folder);
-    // for workshop_port in workshop_parts {
-    //     part_registry.parts.insert(workshop_port.id,workshop_port);
-    // }
-    //
-    // let builtin_parts = get_builtin_parts(&game_folder, &cache_folder);
-    // for builtin_part in builtin_parts {
-    //     part_registry.parts.insert(builtin_part.id,builtin_part);
-    // }
-
-    println!("all registered parts is {:?}",part_registry.parts.keys());
-
-}
-
 pub fn get_collider(
     base_part: &BasePart,
     adjustable_hull: Option<&AdjustableHull>,
@@ -150,8 +77,6 @@ pub fn get_collider(
     }
     return transform;
 }
-
-
 
 pub fn generate_adjustable_hull_mesh(mesh: &mut Mesh, adjustable_hull: &AdjustableHull) {
     let resolution = 6*4;
@@ -326,7 +251,7 @@ pub fn place_part<'a>(
     part_registry: &Res<PartRegistry>,
     entity: &mut EntityCommands,
     part: &Part
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
 
     let Some(part_data) = part_registry.parts.get(&part.base_part().id) else {
         return Err("oh noooo!")?;

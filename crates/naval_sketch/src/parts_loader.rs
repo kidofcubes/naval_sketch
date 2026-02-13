@@ -1,87 +1,21 @@
 use std::{ffi::OsStr, fs::{self, create_dir_all, read_dir, File, ReadDir}, path::{Path, PathBuf}, sync::Arc, time::Duration};
 use std::collections::HashMap;
-use bevy::{app::Plugin, asset::AssetPath, log::{self, debug, info}, math::Vec3, reflect::List, render::RenderPlugin};
-use bevy::prelude::*;
 use csv::StringRecord;
 use quick_xml::Reader;
 
 use regex::Regex;
-use reqwest::blocking::Response;
-use serde::{Deserialize, Serialize};
 use yaml_rust2::Yaml;
 use anyhow::{anyhow, Result};
-
-use crate::{editor_ui::Language, parsing::get_attribute_string, parts::{MultiLangString, PartRegistry, WeaponData}, InitData};
-
+use glam::Vec3;
+use serde::{Deserialize, Serialize};
+use crate::{parsing::get_attribute_string, parts::{MultiLangString, PartRegistry, WeaponData}};
+use crate::parts::Language;
 
 #[derive(Clone, Debug)]
 pub struct LocalPaths {
     pub cache_folder: PathBuf,
     pub game_folder: PathBuf,
     pub workshop_folder: PathBuf,
-}
-
-#[derive(Resource)]
-struct InitDataHolder(
-    Arc<
-        std::sync::Mutex<
-            Option<Vec<PartData>>,
-        >,
-    >,
-);
-
-pub struct PartLoaderPlugin;
-
-impl Plugin for PartLoaderPlugin{
-    fn build(&self, app: &mut bevy::prelude::App) {
-        let data_paths = app.world().resource::<InitData>().data_paths.clone();
-        // structure taken from RenderPlugin
-        let the_thing = Arc::new(std::sync::Mutex::new(None));
-        app.insert_resource(InitDataHolder(the_thing.clone()));
-        
-        let part_retriever = async move {
-                let stuff = get_all_parts(data_paths.as_ref()).await.unwrap();
-                let mut thingy = the_thing.lock().unwrap();
-                *thingy = Some(stuff);
-            };
-
-
-
-        #[cfg(target_arch = "wasm32")]
-        bevy::tasks::IoTaskPool::get()
-            .spawn_local(part_retriever)
-            .detach();
-        // Otherwise, just block for it to complete
-        #[cfg(not(target_arch = "wasm32"))]
-        futures_lite::future::block_on(part_retriever);
-
-    }
-
-    fn ready(&self, app: &bevy::prelude::App) -> bool {
-
-        app.world()
-            .get_resource::<InitDataHolder>()
-            .and_then(|frr| frr.0.try_lock().map(|locked| locked.is_some()).ok())
-            .unwrap_or(true)
-    }
-    fn cleanup(&self, app: &mut bevy::app::App) {
-        let thing = app.world_mut().remove_resource::<InitDataHolder>().unwrap();
-        let result = thing.0.lock().unwrap().take().unwrap();
-
-
-        // #[cfg(target_arch = "wasm32")]
-        // //let mut part_registry = PartRegistry { path_prefix: Some(std::path::PathBuf::new()), parts: HashMap::new() };
-        // let mut part_registry = PartRegistry { path_prefix: None, parts: HashMap::new() };
-        // #[cfg(not(target_arch = "wasm32"))]
-        // let mut part_registry = PartRegistry { path_prefix: Some(app.world().resource::<InitData>().data_paths.as_ref().unwrap().cache_folder.clone()), parts: HashMap::new() };
-        let mut part_registry = PartRegistry { parts: HashMap::new() };
-
-        for part in result {
-            part_registry.parts.insert(part.id,part);
-        }
-        app.world_mut().insert_resource(part_registry);
-
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,7 +42,6 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
     if let Some(local_paths) = local_paths {
         let prefix = local_paths.cache_folder.join("assets/");
         let parts_path = prefix.join("parts.json");
-        info!("the parts path is {:?}",parts_path);
 
         let mut parts: Vec<PartData> = Vec::new();
         println!("the thing is {:?}",parts_path);
@@ -125,7 +58,6 @@ pub async fn get_all_parts(local_paths: Option<&LocalPaths>) -> Result<Vec<PartD
         }
 
 
-        info!("the prefix is {:?}",prefix);
 
         for part in parts.iter_mut() {
             part.model = (local_paths.cache_folder.join(PathBuf::from(part.model.clone()))).into_os_string().into_string().unwrap();

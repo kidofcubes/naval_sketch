@@ -1,25 +1,19 @@
-mod parsing;
 mod cam_movement;
 mod editor;
 mod editor_ui;
-mod parts;
-mod parts_loader;
 mod editor_utils;
 mod editor_actions;
 
-use parts_loader::{get_all_parts, LocalPaths, PartLoaderPlugin};
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use bevy_egui::EguiPlugin;
 use cam_movement::CameraMovementPlugin;
 use editor::{EditorPlugin};
-use parsing::{load_save, AdjustableHull, BasePart, Part};
-use parts::{on_part_meshes_init, place_part, register_all_parts, BasePartMesh, BasePartMeshes, PartRegistry};
 use std::{env, path::{Path, PathBuf}};
 use bevy::asset::UnapprovedPathMode;
 use bevy::ecs::event::Trigger;
-
-
-
+use naval_sketch::parsing::{load_save, AdjustableHull, BasePart, Part};
+use naval_sketch::parts::{on_part_meshes_init, place_part, register_all_parts, BasePartMesh, PartRegistry};
+use naval_sketch::parts_loader::{LocalPaths, PartLoaderPlugin};
 
 fn temp_test_update(
     //mut mesh_thing: ResMut<BuildData>,
@@ -122,8 +116,6 @@ fn temp_test_update(
     //    }
     //}
 }
-
-
 
 
 

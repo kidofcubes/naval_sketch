@@ -1,24 +1,26 @@
 use core::str;
 use std::{error::Error, fmt::Display, fs, path::Path};
 
-use bevy::{color::Color, math::Vec3, prelude::Component};
 use quick_xml::{events::{BytesStart, Event}, Reader};
 use regex::Regex;
 use anyhow::{anyhow, Result};
+use glam::Vec3;
 
-#[derive(Component, Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct BasePart {
     pub id: i32,
     pub ignore_physics: bool,
     pub position: Vec3,
     pub rotation: Vec3,
     pub scale: Vec3,
-    pub color: Color,
+    pub color: [u8; 3], /// RGB
     pub armor: i32,
 }
 
-#[derive(Component, Debug, Copy, Clone)]
-#[require(BasePart)]
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+#[cfg_attr(feature = "bevy", require(BasePart))]
 pub struct AdjustableHull {
     pub length: f32,
     pub height: f32,
@@ -32,8 +34,9 @@ pub struct AdjustableHull {
     pub height_offset: f32,
 }
 
-#[derive(Component, Debug, Copy, Clone)]
-#[require(BasePart)]
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+#[cfg_attr(feature = "bevy", require(BasePart))]
 pub struct Turret{
     pub manual_control: bool,
     pub elevator: Option<f32>,
@@ -60,7 +63,7 @@ impl Default for BasePart {
                 y: 1.0,
                 z: 1.0,
             },
-            color: Color::srgb(5.0, 5.0, 5.0),
+            color: [255,255,255],
             armor: 0,
         }
     }
@@ -136,23 +139,11 @@ impl Part{
     }
 }
 
-#[derive(Debug)]
-pub struct ParseError {
-    desc: String
-}
-impl Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"{}",self.desc)
-    }
-}
-
-impl std::error::Error for ParseError {}
-
 pub fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Result<String> {
     //println!("checking the {:?} which was {:?}", field_name, str::from_utf8(e.try_get_attribute(field_name)?.unwrap().value.as_ref()));
 
     return Ok(str::from_utf8(e.try_get_attribute(field_name)?
-        .ok_or(ParseError{desc: format!("field {:?} missing from {:?}",field_name,e).to_string()})?
+        .ok_or(anyhow!("field {:?} missing from {:?}",field_name,e))?
         .value.as_ref())?.to_string());
 }
 
@@ -252,7 +243,7 @@ pub fn load_save(file_path: &Path) -> Result<Vec<Part>> {
                     }
                     b"color" => {
                         let color: u32 = u32::from_str_radix(re.replace_all(&get_attribute_string(&e, "hex")?,"").as_ref(), 16)?;
-                        current_part.base_part_mut().color = Color::srgb_u8((color >> 16) as u8,(color >> 8) as u8,(color >> 0) as u8);
+                        current_part.base_part_mut().color = [(color >> 16) as u8,(color >> 8) as u8,(color >> 0) as u8];
                     }
                     _ => {}
                 }

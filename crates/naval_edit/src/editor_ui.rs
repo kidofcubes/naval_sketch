@@ -9,6 +9,8 @@ use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibilit
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::SmallRng, Rng, RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
+use naval_sketch::parsing::{AdjustableHull, BasePart, Turret};
+use naval_sketch::parts::{get_collider, register_all_parts, PartAttributes, PartRegistry};
 use crate::{editor::EditorOptions};
 
 use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMesh, BasePartMeshes, PartAttributes, PartRegistry}};
@@ -83,13 +85,6 @@ impl Plugin for EditorUiPlugin {
         app.add_systems(EguiPrimaryContextPass, egui_update);
         app.insert_resource(TestData { part_thumbnails: HashMap::new() } );
     }
-}
-
-#[derive(Enumerated, Debug, Copy, Clone, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum Language {
-    CN,
-    EN,
-    UNSPECIFIED
 }
 
 #[derive(Resource)]
