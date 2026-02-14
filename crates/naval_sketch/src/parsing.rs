@@ -4,140 +4,7 @@ use std::{error::Error, fmt::Display, fs, path::Path};
 use quick_xml::{events::{BytesStart, Event}, Reader};
 use regex::Regex;
 use anyhow::{anyhow, Result};
-use glam::Vec3;
-
-#[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct BasePart {
-    pub id: i32,
-    pub ignore_physics: bool,
-    pub position: Vec3,
-    pub rotation: Vec3,
-    pub scale: Vec3,
-    pub color: [u8; 3], /// RGB
-    pub armor: i32,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-#[cfg_attr(feature = "bevy", require(BasePart))]
-pub struct AdjustableHull {
-    pub length: f32,
-    pub height: f32,
-    pub front_width: f32,
-    pub back_width: f32,
-    pub front_spread: f32,
-    pub back_spread: f32,
-    pub top_roundness: f32,
-    pub bottom_roundness: f32,
-    pub height_scale: f32,
-    pub height_offset: f32,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-#[cfg_attr(feature = "bevy", require(BasePart))]
-pub struct Turret{
-    pub manual_control: bool,
-    pub elevator: Option<f32>,
-}
-
-
-impl Default for BasePart {
-    fn default() -> BasePart {
-        BasePart {
-            id: 0,
-            ignore_physics: false,
-            position: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            rotation: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            scale: Vec3 {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-            },
-            color: [255,255,255],
-            armor: 0,
-        }
-    }
-}
-
-
-impl Default for AdjustableHull{
-    fn default() -> AdjustableHull {
-        AdjustableHull {
-            length:6.0,
-            height:6.0,
-            front_width:6.0,
-            back_width:6.0,
-            front_spread:0.0,
-            back_spread:0.0,
-            top_roundness:0.0,
-            bottom_roundness:1.0,
-            height_scale:1.0,
-            height_offset:0.0
-        }
-    }
-}
-
-impl Default for Turret{
-    fn default() -> Turret{
-        Turret {
-            manual_control: true,
-            elevator: None
-        }
-    }
-}
-
-
-#[derive(Debug, Copy, Clone)]
-pub enum Part {
-    Normal(BasePart),
-    AdjustableHull(BasePart,AdjustableHull),
-    Turret(BasePart,Turret),
-}
-
-impl Part{
-    pub fn base_part(&self) -> &BasePart {
-        match self {
-            Part::Normal(part) => part,
-            Part::AdjustableHull(part,_) => part,
-            Part::Turret(part,_) => part
-        }
-    }
-    pub fn base_part_mut(&mut self) -> &mut BasePart {
-        match self {
-            Part::Normal(part) => part,
-            Part::AdjustableHull(part,_) => part,
-            Part::Turret(part,_) => part
-        }
-    }
-
-    pub fn from_optionals(components: (&BasePart, Option<&AdjustableHull>, Option<&Turret>)) -> Part {
-        if let Some(adjustable_hull) = components.1 {
-            Part::AdjustableHull(*components.0, *adjustable_hull)
-        } else if let Some(turret) = components.2 {
-            Part::Turret(*components.0, *turret)
-        } else {
-            Part::Normal(*components.0)
-        }
-    }
-
-    pub fn to_optionals(&self) -> (&BasePart, Option<&AdjustableHull>, Option<&Turret>) {
-        match self {
-            Part::Normal(part) => (part,None,None),
-            Part::AdjustableHull(part,adjustable_hull) => (part, Some(adjustable_hull), None),
-            Part::Turret(part,turret) => (part, None, Some(turret))
-        }
-    }
-}
+use crate::parts::{AdjustableHull, BasePart, Part, Turret};
 
 pub fn get_attribute_string<'a>(e: &'a BytesStart<'a>, field_name: &str) -> Result<String> {
     //println!("checking the {:?} which was {:?}", field_name, str::from_utf8(e.try_get_attribute(field_name)?.unwrap().value.as_ref()));
@@ -243,7 +110,7 @@ pub fn load_save(file_path: &Path) -> Result<Vec<Part>> {
                     }
                     b"color" => {
                         let color: u32 = u32::from_str_radix(re.replace_all(&get_attribute_string(&e, "hex")?,"").as_ref(), 16)?;
-                        current_part.base_part_mut().color = [(color >> 16) as u8,(color >> 8) as u8,(color >> 0) as u8];
+                        current_part.base_part_mut().color = [255,(color >> 16) as u8,(color >> 8) as u8,(color >> 0) as u8];
                     }
                     _ => {}
                 }

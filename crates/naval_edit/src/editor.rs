@@ -5,14 +5,14 @@ use bevy_egui::EguiContexts;
 use enum_collections::{EnumMap, Enumerated};
 use regex::Regex;
 
-use crate::{parts_loader::get_all_parts, cam_movement::EditorCamera, editor_actions::{EditorActionEvent, EditorSettingChange}, editor_ui::{render_gizmos, update_command_text, update_display_text, update_selected, EditorUiPlugin, Language, PropertiesDisplayData}, editor_utils::to_touch, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, BasePartMesh, BasePartMeshes, PartRegistry}, InitData};
+use crate::{cam_movement::EditorCamera, editor_actions::{EditorActionEvent, EditorSettingChange}, editor_ui::{render_gizmos, update_command_text, update_display_text, update_selected, EditorUiPlugin, PropertiesDisplayData}, editor_utils::to_touch, InitData};
 use bevy::{app::{DynEq, Plugin, Startup, Update}, asset::{AssetPath, AssetServer, Assets, Handle, RenderAssetUsages}, color::{Color, Luminance, Srgba}, ecs::{query::Or, system::{Local, SystemState}, world::{World}}, gltf::GltfAssetLabel, image::Image, input::{keyboard::{Key, KeyboardInput}, mouse::{MouseScrollUnit, MouseWheel}, ButtonInput}, log::info, math::{bounding::BoundingVolume, primitives::Cuboid, Dir3, Isometry3d, Quat, UVec2, Vec2, Vec3}, pbr::{MeshMaterial3d, StandardMaterial}, picking::{mesh_picking::ray_cast::{MeshRayCast}, pointer::{PointerInteraction, PointerPress}}, prelude::*, reflect::List, render::{RenderPlugin}, scene::{SceneInstance, SceneRoot}, tasks::{futures_lite::future, Task}, text::{TextColor, TextFont, TextLayout}, transform::components::GlobalTransform, ui::{widget::ImageNode, BackgroundColor, FlexDirection, FlexWrap, Node, Overflow, PositionType, ScrollPosition, UiRect, Val}, window::Window};
 use bevy::ecs::event::Trigger;
 use bevy::ecs::message::MessageCursor;
 use bevy::mesh::PrimitiveTopology;
 use rand::{rngs::SmallRng, Rng, SeedableRng};
-
-
+use naval_sketch::bevy_plugin::{argb_slice_to_color, base_part_to_bevy_transform, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, BasePartMesh, BasePartMeshes};
+use naval_sketch::parts::{AdjustableHull, BasePart, Language, Part, PartRegistry, Turret};
 
 #[derive(Resource)]
 pub struct DebugGizmo{
@@ -650,7 +650,7 @@ pub fn on_part_changed(
 
         if let Ok(part_meshes) = base_part_meshes.get(pair.1) {
             for mesh_entity in &part_meshes.meshes {
-                meshes_query.get_mut(*mesh_entity).unwrap().1.0 = materials.add(colored_part_material(parts.get(pair.1).unwrap().0.color));
+                meshes_query.get_mut(*mesh_entity).unwrap().1.0 = materials.add(colored_part_material(argb_slice_to_color(&parts.get(pair.1).unwrap().0.color)));
             }
         }
 

@@ -9,11 +9,12 @@ use bevy_egui::{egui::{self, load::SizedTexture, scroll_area::ScrollBarVisibilit
 use enum_collections::{EnumMap, Enumerated};
 use rand::{rngs::SmallRng, Rng, RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
-use naval_sketch::parsing::{AdjustableHull, BasePart, Turret};
-use naval_sketch::parts::{get_collider, register_all_parts, PartAttributes, PartRegistry};
+use naval_sketch::bevy_plugin::{argb_slice_to_color, colored_part_material, get_collider};
+use naval_sketch::parts::{AdjustableHull, BasePart, PartRegistry, Turret};
 use crate::{editor::EditorOptions};
 
-use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, colored_part_material, generate_adjustable_hull_mesh, get_collider, register_all_parts, BasePartMesh, BasePartMeshes, PartAttributes, PartRegistry}};
+use crate::{cam_movement::{spawn_player, EditorCamera}, editor::{CommandData, CommandMode, EditorData, Selected}, editor_actions::EditorActionEvent, editor_utils::{cuboid_face, get_nearby, simple_closest_dist, with_corner_adjacent_adjustable_hulls, AdjHullSide}};
+use crate::editor_utils::PartAttributes;
 
 pub struct EditorUiPlugin;
 
@@ -69,7 +70,7 @@ impl Plugin for EditorUiPlugin {
                 // commands.entity(trigger.entity).remove::<GizmoTarget>();
             }
         );
-        app.add_systems(Startup, spawn_ui.after(register_all_parts).after(spawn_player));
+        app.add_systems(Startup, spawn_ui.after(spawn_player));
         app.add_systems(Update, (update_scroll_position));
         app.insert_resource(
             CommandDisplayData {
@@ -562,15 +563,6 @@ pub fn render_gizmos(
 
 
 
-pub fn get_base_part_entity(parent_query: &Query<&ChildOf>, part_query: &Query<&BasePart>, entity: Entity) -> Option<Entity>{
-    // i'm assuming iter_ancestors loops it in order of nearest parent hopfully
-    for base_entity in once(entity).chain(parent_query.iter_ancestors(entity)) {
-        if part_query.get(base_entity).is_ok() {
-            return Some(base_entity);
-        }
-    };
-    return None;
-}
 
 pub fn update_selected(
     children_query: Query<&Children>,
@@ -722,7 +714,7 @@ pub fn on_hover(
             commands.entity(base_entity).insert(Hovered{});
             for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
                 if let Ok(mut material) = material_query.get_mut(entity) {
-                    material.0 = materials.add(colored_part_material(base_part.color.with_luminance(base_part.color.luminance()*2.0)));
+                    material.0 = materials.add(colored_part_material(argb_slice_to_color(&base_part.color).with_luminance(argb_slice_to_color(&base_part.color).luminance()*2.0)));
                 }
             }
             break;
@@ -745,7 +737,7 @@ pub fn on_unhover(
             commands.entity(base_entity).remove::<Hovered>();
             for entity in once(base_entity).chain(children_query.iter_descendants(base_entity)) {
                 if let Ok(mut material) = material_query.get_mut(entity) {
-                    material.0 = materials.add(colored_part_material(base_part.color));
+                    material.0 = materials.add(colored_part_material(argb_slice_to_color(&base_part.color)));
                 }
             }
             break;

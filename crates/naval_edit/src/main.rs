@@ -11,9 +11,10 @@ use editor::{EditorPlugin};
 use std::{env, path::{Path, PathBuf}};
 use bevy::asset::UnapprovedPathMode;
 use bevy::ecs::event::Trigger;
-use naval_sketch::parsing::{load_save, AdjustableHull, BasePart, Part};
-use naval_sketch::parts::{on_part_meshes_init, place_part, register_all_parts, BasePartMesh, PartRegistry};
-use naval_sketch::parts_loader::{LocalPaths, PartLoaderPlugin};
+use naval_sketch::bevy_plugin::{argb_slice_to_color, place_part, BasePartMesh, NavalSketchPlugin};
+use naval_sketch::parsing::{load_save};
+use naval_sketch::parts::{AdjustableHull, BasePart, Part, PartRegistry};
+use naval_sketch::parts_loader::LocalPaths;
 
 fn temp_test_update(
     //mut mesh_thing: ResMut<BuildData>,
@@ -36,7 +37,7 @@ fn temp_test_update(
         for mut pair in &mut query {
             //let colored_mat = StandardMaterial::from_color(base_part_query.get(parent_query.root_ancestor(pair.0)).unwrap().1.color);
 
-            let colored_mat = StandardMaterial::from_color(base_part_query.get(pair.3.base_part).unwrap().1.color);
+            let colored_mat = StandardMaterial::from_color(argb_slice_to_color(&base_part_query.get(pair.3.base_part).unwrap().1.color));
             let colored_mat_handle = materials.add(colored_mat);
             // materials.insert(pair.2.id(),
             //     colored_mat.clone()
@@ -182,7 +183,7 @@ fn setup(
                         position: Vec3 {x:10.0,y:10.0,z:10.0},
                         rotation: Vec3::ZERO,
                         scale: Vec3 {x:5.0,y:1.0,z:5.0},
-                        color: Color::WHITE,
+                        color: [255, 255, 255, 255],
                         armor: 0,
                     }));
 
@@ -199,7 +200,7 @@ fn setup(
                         position: Vec3 {x:20.0,y:10.0,z:10.0},
                         rotation: Vec3::ZERO,
                         scale: Vec3 {x:1.0,y:1.0,z:1.0},
-                        color: Color::srgb_u8(0, 255, 0),
+                        color: [255, 0, 255, 0],
                         armor: 0,
                     }));
             
@@ -320,7 +321,7 @@ fn main() {
     App::new()
         .insert_resource(InitData {
             file_path,
-            data_paths
+            data_paths: data_paths.clone()
         })
         .insert_resource(WireframeConfig {
             // The global wireframe config enables drawing of wireframes on every mesh,
@@ -334,7 +335,9 @@ fn main() {
         .add_plugins((
                 // WebAssetPlugin,
                 default_plugins,
-                PartLoaderPlugin,
+                NavalSketchPlugin{
+                    init_paths: data_paths.unwrap(),
+                },
                 WireframePlugin::default(),
                 CameraMovementPlugin,
                 MeshPickingPlugin,
@@ -342,8 +345,8 @@ fn main() {
                 //OutlinePlugin,
                 EguiPlugin::default(),
                 ))
-        .add_systems(Startup, (register_all_parts,setup).chain())
-        .add_systems(Update, (temp_test_update, on_part_meshes_init))
+        .add_systems(Startup, (setup).chain())
+        .add_systems(Update, (temp_test_update))
 
 
         .run();

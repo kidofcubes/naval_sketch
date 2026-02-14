@@ -5,9 +5,10 @@ use std::ops::Deref;
 use bevy::{app::App, asset::{AssetServer, Assets}, color::Color, ecs::{event::Event, system::Commands}, math::{Dir3, EulerRot, Isometry3d, Quat, Vec3}, pbr::StandardMaterial, picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings}, prelude::{Camera, Entity, Gizmos, GlobalTransform, Query, Res, ResMut, Single, Transform, With}, state::commands, window::Window};
 use bevy::prelude::{Mesh, On};
 use enum_collections::Enumerated;
-
-use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, EditorOptions, Selected}, editor_ui::{Hovered, Language, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, set_adjustable_hull_width, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}, parsing::{AdjustableHull, BasePart, Part, Turret}, parts::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, get_collider, place_part, unity_to_bevy_quat, unity_to_bevy_translation, PartAttributes, PartRegistry}};
-
+use naval_sketch::bevy_plugin::{base_part_to_bevy_transform, bevy_quat_to_unity, bevy_to_unity_translation, get_collider, place_part, unity_to_bevy_quat, unity_to_bevy_translation};
+use naval_sketch::parts::{AdjustableHull, BasePart, Language, Part, PartRegistry, Turret};
+use crate::{cam_movement::EditorCamera, editor::{DebugGizmo, EditorData, EditorOptions, Selected}, editor_ui::{Hovered, PropertiesDisplayData}, editor_utils::{arrow, cuboid_face, cuboid_face_normal, cuboid_scale, get_nearby, round_to_axis, simple_closest_dist, to_touch, with_corner_adjacent_adjustable_hulls, AdjHullSide}};
+use crate::editor_utils::PartAttributes;
 
 #[derive(Event)]
 pub enum EditorActionEvent {
