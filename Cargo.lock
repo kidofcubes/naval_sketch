@@ -3924,7 +3924,6 @@ dependencies = [
  "chrono",
  "console_error_panic_hook",
  "console_log",
- "csv",
  "dirs",
  "enum-collections",
  "futures-lite",
@@ -3932,17 +3931,12 @@ dependencies = [
  "gloo-net",
  "naval_sketch",
  "pollster",
- "quick-xml 0.39.0",
  "rand 0.10.0",
  "regex",
  "reqwest",
- "serde",
- "serde_json",
- "smol_str",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "yaml-rust2",
 ]
 
 [[package]]

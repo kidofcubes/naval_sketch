@@ -365,7 +365,7 @@ pub fn place_part<'a>(
 ) -> anyhow::Result<()> {
 
     let Some(part_data) = part_registry.parts.get(&part.base_part().id) else {
-        return Err(anyhow!("oh noooo"));
+        return Err(anyhow!("oh noooo it doesn't exist id {} in a registry of length {}",(part.base_part().id),part_registry.parts.len()));
     };
     // let mut entity: EntityCommands = commands.spawn((
     //
